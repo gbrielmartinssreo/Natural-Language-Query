@@ -1,0 +1,22 @@
+[project]
+name = "nlq"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Gabriel Martins", email = "gbmmorais50@gmail.com" }
+]
+requires-python = ">=3.14"
+dependencies = [
+    "custom-tree>=1.7",
+    "langchain>=1.4.3",
+    "langchain-openrouter>=0.2.9",
+    "python-dotenv>=1.2.3",
+]
+
+[project.scripts]
+nlq = "nlq.main:main"
+
+[build-system]
+requires = ["uv_build>=0.12.5,<0.13.0"]
+build-backend = "uv_build"
