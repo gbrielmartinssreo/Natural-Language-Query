@@ -1,5 +1,8 @@
 # Natural Language Query (NLQ)
 
+![Status do Projeto](https://img.shields.io/badge/Status-Desenvolvimento-yellow)
+
+
 O **NLQ** é um projeto voltado à consulta e interpretação de dados armazenados em
 planilhas por meio de **linguagem natural**.
 
