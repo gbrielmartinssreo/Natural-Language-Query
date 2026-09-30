@@ -3,11 +3,11 @@
 ## 1. Papel
 
 O agente é a camada de raciocínio e orquestração do NLQ. Ele recebe a pergunta em
-linguagem natural, decide **como** responder (quais ferramentas usar) e devolve
-uma resposta fiel, confiável e rastreável.
+linguagem natural, **consulta a planilha através de uma ferramenta** e devolve uma
+resposta fiel e rastreável.
 
-Hoje o agente **não tem ferramentas** — ele apenas conversa com o modelo. Toda a
-capacidade de consultar planilhas virá de ferramentas registradas nele.
+O LLM é quem decide o que consultar, interpreta o JSON retornado e redige a
+resposta — não há etapas rigidamente separadas no código.
 
 ## 2. Implementação atual
 
@@ -20,25 +20,35 @@ model = init_chat_model(
     timeout=60000,
     max_tokens=500,
 )
-return create_agent(model=model, tools=[], system_prompt="Você é um assistente útil e objetivo.")
+
+return create_agent(
+    model=model,
+    tools=[],
+    system_prompt="Você é um assistente útil e objetivo.",
+)
 ```
 
-| Item            | Valor atual                                   |
-|-----------------|-----------------------------------------------|
-| Framework       | LangChain (`create_agent`) + LangGraph        |
-| Provider        | OpenRouter (`init_chat_model`)                |
-| Modelo          | `qwen/qwen3-30b-a3b-instruct-2507`            |
-| `temperature`   | `0.1` (respostas determinísticas)             |
-| `timeout`       | `60000` **milissegundos** (60 s)              |
-| `max_tokens`    | `500`                                          |
-| Ferramentas     | nenhuma (`tools=[]`)                          |
-| Prompt de sistema | genérico, provisório                        |
+| Item               | Valor atual                        |
+|--------------------|------------------------------------|
+| Framework          | LangChain (`create_agent`)         |
+| Provider           | OpenRouter (`init_chat_model`)     |
+| Modelo             | `qwen/qwen3-30b-a3b-instruct-2507` |
+| `temperature`      | `0.1` (respostas determinísticas)  |
+| `timeout`          | `60000` **milissegundos** (60 s)   |
+| `max_tokens`       | `500`                              |
+| Ferramentas        | nenhuma (`tools=[]`) — **a implementar** |
+| Prompt de sistema  | genérico, provisório               |
 
-Entrada/saída via lista de mensagens:
+### Interface (CLI)
+
+`src/nlq/main.py` monta o loop de conversa:
 
 ```python
-agent.invoke({"messages": [{"role": "user", "content": "..."}]})["messages"][-1].content
+agent.invoke({"messages": [{"role": "user", "content": user_input}]})["messages"][-1].content
 ```
+
+Loop simples, sem histórico: cada pergunta é enviada isoladamente, com
+`"sair"`, `"exit"` e `"quit"` como comandos de encerramento.
 
 ## 3. Configuração do modelo
 
@@ -49,34 +59,42 @@ LLM não exige alterar o núcleo — basta mudar a string. Parâmetros relevante
 - **`max_tokens`** — limita o tamanho da resposta.
 - **`timeout`** — em **milissegundos** (ver armadilhas).
 
-## 4. Ferramentas (a implementar)
+## 4. Tool de planilha (a implementar)
 
-O agente deve ganhar ferramentas em vez de responder "de cabeça". Proposta:
+É o único mecanismo previsto hoje para o agente acessar os dados: uma tool que
+recebe a solicitação do LLM, chama o **parser** e devolve o **JSON** da planilha.
 
-| Ferramenta            | Função                                                    |
-|-----------------------|-----------------------------------------------------------|
-| `listar_abas`         | Descreve abas/colunas disponíveis na planilha             |
-| `ler_esquema`         | Retorna tipos, cabeçalhos e hierarquia de uma aba         |
-| `consultar_dados`     | Executa consulta estruturada e retorna linhas/agregados   |
-| `buscar_texto` (RAG)  | Recupera células relevantes por similaridade (futuro)     |
+```
+LLM → tool de planilha → parser (XLSX/CSV) → JSON → LLM
+```
 
-Regra: o agente **só** afirma um valor que veio de uma ferramenta. Sem isso, deve
-dizer que não sabe.
+Requisitos da tool:
+
+- Receber a pergunta/consulta do LLM e devolver **JSON** legível pelo modelo.
+- Ser agnóstica de layout — o núcleo não assume uma planilha específica.
+- Sinalizar ausência de dado (`n/a`, célula vazia) explicitamente, para que o LLM
+  não trate ausência como zero.
+- Falhar de forma explícita quando o arquivo não puder ser lido, em vez de
+  devolver resultado parcial silencioso.
 
 ## 5. Prompt de sistema
 
-O prompt atual ("Você é um assistente útil e objetivo.") é provisório. A evolução
-deve instruir explicitamente:
+O prompt atual ("Você é um assistente útil e objetivo.") é provisório. Deve
+passar a instruir explicitamente:
 
-- Nunca inventar dados; usar ferramentas para obter valores.
-- Devolver a resposta **e** a origem (aba/coluna/consulta) para rastreabilidade.
+- Nunca inventar dados; usar a tool para obter valores.
 - Tratar `n/a` e células vazias como ausência de dado, não como zero.
+- Devolver a resposta **e** a origem (arquivo/aba/coluna) para rastreabilidade.
 - Pedir esclarecimento quando a pergunta for ambígua.
 
-## 6. Roadmap do agente
+## 6. Dívidas técnicas conhecidas
 
-1. Adicionar ferramentas de leitura/esquema da planilha.
-2. Definir prompt de sistema com foco em fidelidade e rastreabilidade.
-3. Introduzir validação da resposta contra a execução (guarda-corpo).
-4. Avaliar memória de conversa (`session_id`) para consultas em múltiplos turnos.
-5. Evoluir a seleção de técnicas (NL2SQL → RAG → AST) conforme a complexidade.
+- Tool de planilha e parser ainda não existem — `tools=[]`.
+- Prompt de sistema sem regras de fidelidade.
+- Sem histórico de conversa entre turnos.
+- Sem testes automatizados.
+
+## 7. Evoluções possíveis
+
+Detalhamento de ferramentas de esquema, RAG, NL2SQL, AST, validação e memória em
+[`possible_implements.md`](possible_implements.md).

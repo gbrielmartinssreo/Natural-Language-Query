@@ -2,65 +2,63 @@
 
 ## 1. Visão geral
 
-O NLQ converte perguntas em linguagem natural em **consultas estruturadas** sobre
-planilhas, priorizando fidelidade, confiabilidade e rastreabilidade. A arquitetura
-é **agnóstica de planilha**: o núcleo não conhece fórmulas nem layouts específicos.
+O NLQ responde **perguntas em linguagem natural** sobre dados de planilhas
+(XLSX/CSV). O caminho é direto: o agente conversa com o LLM, o LLM decide o que
+consultar, uma **ferramenta de planilha** devolve os dados em **JSON**, e o LLM
+interpreta, calcula e redige a resposta final.
 
+```mermaid
+---
+config:
+  layout: dagre
+---
+flowchart LR
+ subgraph LC["LangChain"]
+        A["Agent"]
+        L1["LLM"]
+        T["Tool de Planilha"]
+        J["JSON da Planilha"]
+        R["Resposta final"]
+  end
+    U["Usuário"] --> Q["Pergunta"]
+    X["XLSX,CSV"] --> P["Parser"]
+    P --> J
+    Q --> A
+    A --> L1
+    L1 -- decide o que consultar --> T
+    T --> J
+    J --> L1
+    L1 -- interpreta / calcula / redige --> R
+    R --> U
 ```
-                         ┌──────────────────────────────────────┐
-  Pergunta (PT-BR)       │              Núcleo NLQ              │
-  ──────────────────────▶│                                      │
-                         │  1. Entender a intenção              │
-                         │  2. Localizar dados relevantes       │
-                         │  3. Gerar consulta estruturada       │
-                         │  4. Executar e validar               │
-                         │  5. Responder + justificar           │
-                         └───────────────┬──────────────────────┘
-                                         │
-             ┌───────────────────────────┼───────────────────────────┐
-             ▼                           ▼                           ▼
-      Camada de dados            Camada de consulta          Camada de agente
-   (planilhas, esquema)          (NL2SQL / RAG / AST)        (LangChain + LLM)
-```
 
-## 2. Camadas
+O projeto é **agnóstico de planilha**: o núcleo não conhece fórmulas nem layouts
+específicos. Detalhes do agente em [`agent.md`](agent.md).
 
-### 2.1 Camada de agente — **Atual**
-Responsável pelo raciocínio e pela orquestração. Hoje é um único agente LangChain
-criado em `create_nlq_agent()` (`src/nlq/agent/agent.py`), com o modelo acessado
-via OpenRouter e prompt de sistema estático. Detalhes em [`agent.md`](agent.md).
+## 2. Componentes
 
-### 2.2 Camada de dados (leitura de planilhas) — **A construir**
-Abstrai a origem dos dados atrás de uma interface única, para que o núcleo não
-dependa do formato do arquivo:
+| Componente            | Onde                        | Papel                                                            | Estado       |
+|-----------------------|-----------------------------|------------------------------------------------------------------|--------------|
+| Interface (CLI)       | `src/nlq/main.py`           | Recebe a pergunta e imprime a resposta                            | **Atual**    |
+| Agente (LangChain)    | `src/nlq/agent/agent.py`    | Orquestra o ciclo LLM ↔ ferramenta                               | **Atual**    |
+| LLM (OpenRouter)      | `src/nlq/agent/agent.py`    | Decide o que consultar, interpreta os dados e redige a resposta   | **Atual**    |
+| Tool de planilha      | `src/nlq/agent/agent.py`    | Tool registrada no agente que expõe os dados da planilha          | **A implementar** |
+| Parser (XLSX/CSV)     | —                           | Lê o arquivo e converte para JSON consumível pelo LLM              | **A implementar** |
+| Resposta final        | `src/nlq/main.py`           | Texto devolvido ao usuário                                       | **Atual**    |
 
-- **Descoberta de esquema**: nome das abas, colunas, tipos e hierarquia.
-- **Leitura**: transformar a planilha em uma estrutura consultável (ex.: tabelas
-  ou DataFrame), lidando com células mescladas, cabeçalhos em múltiplas linhas e
-  valores `n/a` — comuns na planilha de teste.
-- **Catálogo**: metadados que descrevem o que cada aba/coluna significa.
+## 3. Fluxo de uma pergunta
 
-### 2.3 Camada de consulta — **A construir**
-Traduz a intenção em operações sobre os dados. Estratégia evolutiva:
+1. **Entrada** — o usuário digita a pergunta na CLI.
+2. **Agente → LLM** — o agente encaminha a pergunta ao modelo.
+3. **Decisão** — o LLM decide o que precisa consultar na planilha.
+4. **Consulta** — o LLM chama a **tool de planilha**; o **parser** lê o
+   XLSX/CSV e devolve o **JSON** da planilha.
+5. **Volta ao LLM** — o JSON é devolvido ao modelo como contexto.
+6. **Resposta** — o LLM interpreta, calcula e redige a resposta final.
+7. **Saída** — a resposta é impressa para o usuário.
 
-| Técnica   | Uso                                                     | Quando entra            |
-|-----------|---------------------------------------------------------|-------------------------|
-| `NL2SQL`  | Perguntas agregáveis/relacionais sobre tabelas          | Primeira etapa          |
-| `RAG`     | Perguntas semânticas sobre texto livre das células      | Quando o léxico variar  |
-| `AST`     | Análise estruturada/estatística sobre os dados          | Consultas complexas     |
-
-As técnicas podem ser combinadas: recuperar candidatos via RAG e executar a
-agregação via SQL/estruturada.
-
-## 3. Fluxo de uma consulta
-
-1. **Entrada** — pergunta do usuário (via CLI hoje, interface conversacional no futuro).
-2. **Interpretação** — o agente identifica intenção, entidades e período/escopo.
-3. **Planejamento** — decide qual ferramenta usar (dados, consulta, RAG).
-4. **Geração** — produz uma consulta estruturada (SQL, Pandas, AST...).
-5. **Execução** — roda a consulta contra a camada de dados.
-6. **Validação** — confere se o resultado responde à pergunta (guarda-corpo de fidelidade).
-7. **Resposta** — devolve o resultado **com a consulta/justificativa** (rastreabilidade).
+Não há etapa separada de validação, memória de conversa nem consulta em linguagem
+estruturada: o LLM faz a interpretação e o cálculo sobre o JSON.
 
 ## 4. Princípios de projeto
 
@@ -68,22 +66,20 @@ agregação via SQL/estruturada.
   valores ausentes.
 - **Confiabilidade** — falhas de execução devem ser explícitas e recuperáveis, não
   silenciosas.
-- **Rastreabilidade** — toda resposta é acompanhável até a consulta e a célula de
-  origem.
+- **Rastreabilidade** — a resposta é acompanhável até o dado de origem.
 - **Agnóstico de planilha** — o núcleo não pode assumir um layout específico.
-- **Extensibilidade** — novas técnicas (RAG, AST, novos modelos) entram sem
-  reescrever o núcleo.
+- **Extensibilidade** — novas ferramentas e novos modelos entram sem reescrever
+  o núcleo.
 
-## 5. Pontos de extensão previstos
+## 5. Dívidas técnicas conhecidas
 
-- **Registro de ferramentas** (`tools=[]` em `agent.py`) → cada técnica de consulta
-  vira uma ferramenta do agente.
-- **Seleção de modelo** — o modelo é parametrizável em `create_nlq_agent()`; trocar
-  de LLM via OpenRouter não exige mudar o núcleo.
-  (CSV, múltiplas planilhas) não afeta o agente.
-
-## 6. Dívidas técnicas conhecidas
-
-- Agente sem ferramentas: responde "de cabeça", sem consultar dados.
-- Sem memória/persistência de conversa (`session_id` não usado).
+- **Tool de planilha e parser ausentes** — o agente roda com `tools=[]` e responde
+  sem consultar dados.
+- **Prompt de sistema provisório** — "Você é um assistente útil e objetivo." não
+  orienta fidelidade nem uso de ferramenta.
 - Sem testes automatizados.
+
+## 6. Evoluções possíveis
+
+Ideias fora do escopo atual (NL2SQL, RAG, AST, memória, validação, múltiplas
+ferramentas) estão em [`possible_implements.md`](possible_implements.md).

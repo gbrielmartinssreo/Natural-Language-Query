@@ -3,19 +3,31 @@
 O **NLQ** é um projeto voltado à consulta e interpretação de dados armazenados em
 planilhas por meio de **linguagem natural**.
 
-A proposta é oferecer uma interface conversacional capaz de transformar perguntas
-do usuário em consultas estruturadas sobre os dados, priorizando **fidelidade,
-confiabilidade e rastreabilidade das respostas**.
+A proposta é oferecer uma interface conversacional que responde perguntas do
+usuário a partir dos dados da planilha, priorizando **fidelidade, confiabilidade
+e rastreabilidade das respostas**.
 
 O objetivo é ser **genérico**: operar sobre diferentes planilhas e contextos sem
 exigir que o usuário conheça fórmulas, estruturas de tabelas ou linguagens de
 consulta.
 
+## Arquitetura
+
+O usuário pergunta, o agente (LangChain) leva a pergunta ao LLM, o LLM decide o
+que consultar, uma **tool de planilha** devolve o **JSON** dos dados, e o LLM
+interpreta, calcula e redige a resposta final.
+
+```
+Usuário → Pergunta → Agente → LLM → Tool de Planilha → Parser (XLSX/CSV) → JSON → LLM → Resposta
+```
+
+Detalhes em [`docs/architecture.md`](docs/architecture.md).
+
 ## Estado atual
 
-Esqueleto funcional: um agente LangChain que conversa com um modelo via
-OpenRouter. Ainda **não há ferramentas de leitura de planilha** ligadas ao agente
-(`tools=[]`) — o pipeline de consulta aos dados está em desenvolvimento.
+CLI funcional com agente LangChain conversando com um modelo via OpenRouter. A
+**tool de planilha** e o **parser** ainda não existem (`tools=[]`) — são o
+próximo passo.
 
 A planilha em `sheets/` é o **desafio final** que o projeto deve ser capaz de
 enfrentar, não o escopo inicial.
@@ -40,7 +52,7 @@ OPENROUTER_API_KEY=sua-chave-aqui
 uv run nlq
 ```
 
-Isso carrega o `.env`, cria o agente e envia uma pergunta de exemplo ao modelo.
+Isso carrega o `.env`, cria o agente e abre o chat. Digite `sair` para encerrar.
 
 ## Estrutura
 
@@ -51,17 +63,15 @@ src/nlq/
     agent.py         # create_nlq_agent(): modelo + agente LangChain
 sheets/              # planilhas de teste (desafio final)
 docs/
-  architecture.md    # visão de arquitetura e roadmap de extensão
-  agent.md           # design do agente (modelo, prompt, ferramentas, guardrails)
+  architecture.md         # arquitetura atual e fluxo da consulta
+  agent.md                # design do agente (modelo, prompt, tool de planilha)
+  possible_implements.md  # evoluções futuras (NL2SQL, RAG, AST, memória...)
+  scale_difficulties.md   # escala de dificuldade das planilhas (dimensiona o parser)
 ```
 
-## Roadmap
+## Evoluções possíveis
 
-Começa com uma abordagem baseada em agentes (**LangChain + OpenRouter**) e evolui
-conforme a complexidade das consultas:
+Ideias fora do escopo atual — `NL2SQL`, `RAG`, `AST`, memória de conversa,
+validação da resposta e ferramentas de esquema:
 
-- **NL2SQL** — traduzir a pergunta em consultas estruturadas.
-- **RAG** — recuperação semântica sobre o conteúdo das planilhas.
-- **AST** — manipulação estruturada/analítica dos dados.
-
-Detalhes em [`docs/architecture.md`](docs/architecture.md).
+[`docs/possible_implements.md`](docs/possible_implements.md)
