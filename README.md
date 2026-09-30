@@ -28,9 +28,8 @@ Detalhes em [`docs/architecture.md`](docs/architecture.md).
 
 ## Estado atual
 
-CLI funcional com agente LangChain conversando com um modelo via OpenRouter. A
-**tool de planilha** e o **parser** ainda não existem (`tools=[]`) — são o
-próximo passo.
+CLI funcional com agente LangChain conversando com um modelo. A **tool de
+planilha** e o **parser** ainda não existem (`tools=[]`) — são o próximo passo.
 
 A planilha em `sheets/` é o **desafio final** que o projeto deve ser capaz de
 enfrentar, não o escopo inicial.
@@ -39,7 +38,8 @@ enfrentar, não o escopo inicial.
 
 - [uv](https://docs.astral.sh/uv/)
 - Python `>=3.14` (ver `.python-version`)
-- Uma chave de API do [OpenRouter](https://openrouter.ai/)
+- Uma chave de API do [OpenRouter](https://openrouter.ai/) **ou** do
+  [Groq](https://console.groq.com/keys)
 
 ## Configuração
 
@@ -48,6 +48,20 @@ Crie um `.env` na raiz do projeto:
 ```env
 OPENROUTER_API_KEY=sua-chave-aqui
 ```
+
+A chave do OpenRouter é validada no startup: se a chamada falhar, o agente cai
+automaticamente para o Groq. Para fixar o provider, use `API_SELECT`:
+
+```env
+API_SELECT=openrouter   # ou groq
+```
+
+| `API_SELECT`  | Provider                                        |
+|----------------|-------------------------------------------------|
+| `groq`         | Groq — `openai/gpt-oss-120b`                    |
+| `openrouter`   | OpenRouter — `qwen/qwen3-30b-a3b-instruct-2507` |
+| ausente/outro  | Groq se a chave do OpenRouter for inválida; OpenRouter caso contrário |
+
 
 ## Uso
 
@@ -63,7 +77,7 @@ Isso carrega o `.env`, cria o agente e abre o chat. Digite `sair` para encerrar.
 src/nlq/
   main.py            # entry point (script `nlq`)
   agent/
-    agent.py         # create_nlq_agent(): modelo + agente LangChain
+    agent.py         # create_nlq_agent(): seleção de modelo + agente LangChain
 sheets/              # planilhas de teste (desafio final)
 docs/
   architecture.md         # arquitetura atual e fluxo da consulta
