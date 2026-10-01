@@ -2,14 +2,14 @@ from langchain.agents import create_agent
 from langchain.chat_models import init_chat_model
 
 import os
+import requests
+from pathlib import Path
 from dotenv import load_dotenv
 
-import requests
 
-from pathlib import Path
+from nlq.tools.extract import create_json
 
 load_dotenv()
-
 BASE_DIR = Path(__file__).resolve().parent
 
 def load_prompt(path:str)->str:
@@ -63,8 +63,10 @@ def create_nlq_agent():
     elif os.getenv("API_SELECT") == "openrouter" or check_openrouter_key():
         model = model2
 
+    tools = [create_json]
+
     return create_agent(
         model=model,
-        tools=[],
+        tools=tools,
         system_prompt=(load_prompt("prompts/system_base.md")+"\n\n"+load_prompt("prompts/sejus.md")),
     )
