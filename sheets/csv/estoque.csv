@@ -1,0 +1,11 @@
+﻿codigo,item,categoria,estoque_atual,estoque_minimo,fornecedor,custo
+P001,Papel A4,Escritório,18,20,OfficeMais,31.5
+P002,Caneta azul,Escritório,120,50,OfficeMais,1.9
+T001,Cabo HDMI,TI,7,10,TechSup,24.9
+T002,Mouse USB,TI,15,8,TechSup,42.0
+L001,Detergente,Limpeza,6,12,LimpaTudo,3.8
+L002,Álcool 70%,Limpeza,22,15,LimpaTudo,8.4
+C001,Café 500g,Copa,9,10,BomCafé,18.9
+C002,Açúcar 1kg,Copa,14,8,BomCafé,5.2
+T003,Teclado USB,TI,4,6,InfoCenter,65.0
+P003,Grampeador,Escritório,11,5,Papelaria Centro,22.5

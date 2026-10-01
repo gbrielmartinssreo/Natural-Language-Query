@@ -1,0 +1,11 @@
+﻿data,prato,categoria,quantidade,preco,forma_pagamento,avaliacao
+2026-09-10,X-Burger,Lanche,18,24.9,Pix,4.5
+2026-09-10,Pizza Calabresa,Pizza,12,49.9,Cartão,4.7
+2026-09-10,Refrigerante,Bebida,25,7.0,Dinheiro,4.1
+2026-09-11,X-Salada,Lanche,16,26.9,Pix,4.4
+2026-09-11,Pizza Frango,Pizza,10,52.9,Cartão,4.6
+2026-09-11,Suco Natural,Bebida,14,9.5,Pix,4.8
+2026-09-12,X-Burger,Lanche,20,24.9,Cartão,4.3
+2026-09-12,Batata Frita,Porção,11,22.0,Pix,4.5
+2026-09-12,Pizza Calabresa,Pizza,15,49.9,Cartão,4.7
+2026-09-12,Suco Natural,Bebida,17,9.5,Dinheiro,4.6

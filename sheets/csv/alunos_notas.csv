@@ -1,0 +1,11 @@
+﻿aluno,curso,disciplina,nota1,nota2,faltas,situacao
+Marina,Engenharia,Cálculo III,7.5,8.2,3,Aprovado
+Lucas,Engenharia,Cálculo III,5.4,6.1,8,Recuperação
+Bianca,Computação,Redes,9.1,8.7,1,Aprovado
+Rafael,Computação,Redes,4.8,5.2,10,Reprovado
+João,Engenharia,Física II,6.7,7.0,4,Aprovado
+Camila,Engenharia,Física II,8.9,9.3,0,Aprovado
+Pedro,Computação,Banco de Dados,7.2,6.8,5,Aprovado
+Larissa,Computação,Banco de Dados,5.9,6.4,7,Recuperação
+André,Engenharia,Cálculo III,9.4,9.0,2,Aprovado
+Sofia,Computação,Redes,8.0,7.6,3,Aprovado

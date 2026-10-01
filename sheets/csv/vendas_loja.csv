@@ -1,0 +1,13 @@
+﻿data,produto,categoria,quantidade,preco_unitario,vendedor,cidade
+2026-09-01,Mouse sem fio,Periféricos,3,89.9,Ana,Cuiabá
+2026-09-02,Teclado mecânico,Periféricos,2,249.9,Bruno,Várzea Grande
+2026-09-03,Monitor 24,Monitores,1,899.0,Ana,Cuiabá
+2026-09-04,SSD 1TB,Armazenamento,4,429.9,Carlos,Rondonópolis
+2026-09-05,Headset USB,Áudio,2,159.9,Débora,Cuiabá
+2026-09-06,Webcam HD,Vídeo,5,129.9,Bruno,Sinop
+2026-09-07,Mouse sem fio,Periféricos,2,89.9,Carlos,Rondonópolis
+2026-09-08,Monitor 27,Monitores,2,1299.0,Ana,Cuiabá
+2026-09-09,SSD 500GB,Armazenamento,3,279.9,Débora,Sinop
+2026-09-10,Teclado mecânico,Periféricos,1,249.9,Bruno,Várzea Grande
+2026-09-11,Headset USB,Áudio,4,159.9,Carlos,Cuiabá
+2026-09-12,Webcam HD,Vídeo,2,129.9,Ana,Sinop

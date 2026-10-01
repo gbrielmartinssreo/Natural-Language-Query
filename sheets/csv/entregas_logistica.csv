@@ -1,0 +1,11 @@
+﻿pedido,cidade_destino,transportadora,data_envio,prazo_dias,dias_reais,status,peso_kg
+E001,Cuiabá,Rápido Sul,2026-09-01,3,2,Entregue,4.2
+E002,Sinop,CentroLog,2026-09-01,5,6,Entregue com atraso,8.1
+E003,Rondonópolis,Rápido Sul,2026-09-02,3,3,Entregue,2.0
+E004,Sorriso,Norte Express,2026-09-03,6,5,Entregue,12.5
+E005,Cáceres,CentroLog,2026-09-04,4,7,Entregue com atraso,6.8
+E006,Cuiabá,Norte Express,2026-09-05,2,2,Entregue,1.1
+E007,Sinop,Rápido Sul,2026-09-06,5,,Em trânsito,9.3
+E008,Lucas do Rio Verde,CentroLog,2026-09-07,5,4,Entregue,3.6
+E009,Rondonópolis,Norte Express,2026-09-08,3,,Em trânsito,7.4
+E010,Cáceres,Rápido Sul,2026-09-09,4,4,Entregue,5.0

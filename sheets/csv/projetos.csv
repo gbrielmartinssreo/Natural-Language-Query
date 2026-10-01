@@ -1,0 +1,9 @@
+﻿projeto,responsavel,prioridade,status,progresso_pct,prazo,orcamento
+Portal Interno,Ana,Alta,Em andamento,65,2026-10-20,18000
+Migração Servidor,Carlos,Crítica,Em andamento,40,2026-10-10,32000
+Dashboard RH,Bruno,Média,Concluído,100,2026-09-15,8500
+Inventário TI,Débora,Baixa,Planejado,10,2026-11-05,5000
+Automação Relatórios,Ana,Alta,Em andamento,75,2026-10-01,12000
+Novo Help Desk,Carlos,Média,Planejado,20,2026-11-30,22000
+Revisão de Processos,Débora,Alta,Em andamento,55,2026-10-25,7000
+API Integração,Bruno,Crítica,Atrasado,80,2026-09-25,27000
