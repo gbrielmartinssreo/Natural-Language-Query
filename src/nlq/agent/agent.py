@@ -68,5 +68,5 @@ def create_nlq_agent():
     return create_agent(
         model=model,
         tools=tools,
-        system_prompt=(load_prompt("prompts/system_base.md")+"\n\n"+load_prompt("prompts/sejus.md")),
+        system_prompt=(load_prompt("prompts/system_base.md")+"\n\n"+load_prompt("prompts/specific_role.md")),
     )

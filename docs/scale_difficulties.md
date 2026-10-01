@@ -5,10 +5,18 @@ fluxo do agente — ver [`architecture.md`](architecture.md).
 
 | Nível | Tipo                        | Alvo            |
 |-------|-----------------------------|-----------------|
-| 1     | CSV limpo                   | Escopo inicial   |
+| 1     | CSV limpo                   | Escopo inicial — **alcançável hoje** |
 | 2     | XLSX simples                | —               |
 | 3     | XLSX semi-estruturado       | —               |
-| 4     | Planilha corporativa infernal | Desafio final |
+| 4     | Planilha corporativa infernal | Desafio final — **fora de alcance** |
+
+## Teto atual
+
+A tool `create_json` lê apenas CSV com `csv.DictReader`, então o nível alcançável
+hoje é o **1**. O nível 4 está fora de alcance: passar `ext="xlsx"` levanta
+`UnicodeDecodeError`. Ver as dívidas técnicas em [`agent.md`](agent.md).
+
+Exemplo concreto do nível 4: `sheets/xlsx/MATRIZ ENCAMINHADA - FINAL.xlsx`.
 
 ## Nível 1 — CSV limpo
 

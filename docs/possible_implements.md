@@ -10,8 +10,8 @@ O estado atual e a arquitetura em vigor estão em
 
 ## 1. Ferramentas de leitura e esquema
 
-A tool de planilha atual devolve o JSON da planilha inteira. Evoluções possíveis,
-com uma tool por função:
+A tool de planilha atual (`create_json`) devolve o JSON da planilha inteira.
+Evoluções possíveis, com uma tool por função:
 
 | Ferramenta           | Função                                                    |
 |----------------------|-----------------------------------------------------------|
@@ -22,6 +22,7 @@ com uma tool por função:
 
 Motivo: planilhas grandes estouram o `max_tokens` se o JSON completo for enviado
 ao LLM a cada pergunta. Descobrir esquema antes de consultar reduz o payload.
+Com a tool atual, qualquer CSV já entra inteiro no contexto.
 
 ## 2. NL2SQL / RAG / AST
 
@@ -48,11 +49,14 @@ manter contexto para consultas em múltiplos turnos ("e no mês passado?").
 
 ## 5. Pontos de extensão já previstos no código
 
-- **Registro de ferramentas** (`tools=[]` em `agent.py`) — cada técnica de consulta
-  vira uma tool do agente.
+- **Registro de ferramentas** (`tools=[create_json]` em `agent.py`) — cada técnica
+  de consulta vira uma tool do agente.
 - **Seleção de modelo** — o modelo é parametrizável em `create_nlq_agent()`; trocar
   de LLM via OpenRouter não exige mudar o núcleo.
-- **Troca de fonte de dados** — CSV ou múltiplas planilhas não afetam o agente.
+- **Troca de fonte de dados** — dentro do formato CSV, trocar de planilha não
+  afeta o agente. Ampliar o parser para XLSX é o que destrava novas fontes.
+- **Escopo do agente** — `prompts/specific_role.md` permite trocar o papel do
+  agente sem alterar o núcleo.
 
 ## 6. Escala de dificuldade das planilhas
 
