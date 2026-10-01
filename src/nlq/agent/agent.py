@@ -1,11 +1,19 @@
 from langchain.agents import create_agent
 from langchain.chat_models import init_chat_model
+
 import os
 from dotenv import load_dotenv
 
 import requests
 
+from pathlib import Path
+
 load_dotenv()
+
+BASE_DIR = Path(__file__).resolve().parent
+
+def load_prompt(path:str)->str:
+   return (BASE_DIR / path).read_text(encoding="utf-8")
 
 
 def check_openrouter_key() -> bool:
@@ -58,5 +66,5 @@ def create_nlq_agent():
     return create_agent(
         model=model,
         tools=[],
-        system_prompt="Você é um assistente útil e objetivo.",
+        system_prompt=(load_prompt("prompts/system_base.md")+"\n\n"+load_prompt("prompts/sejus.md")),
     )
