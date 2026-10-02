@@ -6,6 +6,19 @@ from langchain_core.tools import tool
 
 BASE_DIR = Path(__file__).resolve().parent
 
+def read_csv(path: Path)-> list[dict]:
+    encodings = ["utf-8-sig","utf-8","cp1252","latin-1"]
+
+    for encoding in encodings:
+        try:
+            with path.open("r", encoding=encoding) as arquivo:
+                return list(csv.DictReader(arquivo))
+        except UnicodeDecodeError:
+            continue
+
+    raise ValueError("Não foi possível ler o arquivo")
+
+
 @tool
 def create_json(name:str,ext:str)->str:
 
@@ -19,8 +32,7 @@ def create_json(name:str,ext:str)->str:
 
     path = BASE_DIR / "../../../sheets/" / ext / (name + "." + ext)
 
-    with path.open("r", encoding="utf-8") as arquivo:
-        dados = list(csv.DictReader(arquivo))
+    dados = read_csv(path)
 
     json_dados = json.dumps(
         dados,
