@@ -1,0 +1,42 @@
+name: "📋 Tarefa"
+description: "Criar uma tarefa de desenvolvimento"
+title: ""
+labels:
+  - task
+
+body:
+  - type: textarea
+    id: contexto
+    attributes:
+      label: "Contexto"
+      description: "Por que esta issue existe? Qual o comportamento atual?"
+      placeholder: "Descreva o contexto da issue..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: objetivo
+    attributes:
+      label: "Objetivo"
+      description: "O que deve ser implementado, corrigido ou investigado?"
+      placeholder: "Descreva o que precisa ser feito..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: resultado
+    attributes:
+      label: "Resultado esperado"
+      description: "Como o sistema deve se comportar após a conclusão?"
+      placeholder: "Descreva o resultado esperado..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: notas-tecnicas
+    attributes:
+      label: "Notas técnicas"
+      description: "Informações técnicas, decisões, referências ou observações relevantes."
+      placeholder: "Adicione informações técnicas, se necessário..."
+    validations:
+      required: false
