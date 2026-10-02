@@ -1,8 +1,10 @@
-name: "📋 Tarefa"
+name: "Tarefa"
 description: "Criar uma tarefa de desenvolvimento"
-title: ""
+title: "[TASK] "
 labels:
   - task
+projects:
+  - "gbrielmartinssreo/8"
 
 body:
   - type: textarea
@@ -10,7 +12,7 @@ body:
     attributes:
       label: "Contexto"
       description: "Por que esta issue existe? Qual o comportamento atual?"
-      placeholder: "Descreva o contexto da issue..."
+      placeholder: "Descreva o contexto..."
     validations:
       required: true
 
@@ -19,7 +21,7 @@ body:
     attributes:
       label: "Objetivo"
       description: "O que deve ser implementado, corrigido ou investigado?"
-      placeholder: "Descreva o que precisa ser feito..."
+      placeholder: "Descreva o objetivo..."
     validations:
       required: true
 
@@ -36,7 +38,7 @@ body:
     id: notas-tecnicas
     attributes:
       label: "Notas técnicas"
-      description: "Informações técnicas, decisões, referências ou observações relevantes."
-      placeholder: "Adicione informações técnicas, se necessário..."
+      description: "Informações técnicas, decisões ou observações relevantes."
+      placeholder: "Adicione notas técnicas, se necessário..."
     validations:
       required: false
