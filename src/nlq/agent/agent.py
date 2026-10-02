@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 
 
 from nlq.tools.extract import create_json
+from nlq.tools.dev_master import goat
 
 load_dotenv()
 BASE_DIR = Path(__file__).resolve().parent
@@ -63,7 +64,7 @@ def create_nlq_agent():
     elif os.getenv("API_SELECT") == "openrouter" or check_openrouter_key():
         model = model2
 
-    tools = [create_json]
+    tools = [create_json, goat]
 
     return create_agent(
         model=model,
