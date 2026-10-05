@@ -18,10 +18,14 @@ consulta.
 
 O usuário pergunta, o agente (LangChain) leva a pergunta ao LLM, o LLM decide o
 que consultar, uma **tool de planilha** devolve o **JSON** dos dados, e o LLM
-interpreta, calcula e redige a resposta final.
+interpreta, calcula e redige a resposta final. Uma **tool de descoberta** permite
+listar as planilhas disponíveis, e o checkpointer do agente carrega o histórico
+da sessão em cada turno.
 
 ```
-Usuário → Pergunta → Agente → LLM → Tool de Planilha → Parser (CSV) → JSON → LLM → Resposta
+Usuário → Pergunta → Agente (memória da sessão) → LLM
+   → lista_arquivos (descobre planilhas) | create_json → Parser (CSV | XLSX) → JSON
+   → LLM → Resposta
 ```
 
 Detalhes em [`docs/architecture.md`](docs/architecture.md).
@@ -31,7 +35,8 @@ Detalhes em [`docs/architecture.md`](docs/architecture.md).
 O prompt de sistema é montado por concatenação de dois arquivos Markdown em
 `src/nlq/agent/prompts/`:
 
-- `system_base.md` — regras de funcionamento do agente.
+- `system_base.md` — regras de funcionamento do agente: uso das ferramentas,
+  continuidade da conversa e exibição completa da planilha quando pedida.
 - `specific_role.md` — **opcional**. Define o escopo do agente (papel, competência e
   base normativa). Vem com um exemplo de domínio e pode ser editado ou substituído
   livremente pelo usuário; o núcleo do NLQ não depende do seu conteúdo.
@@ -41,13 +46,26 @@ diferentes trocando apenas esse arquivo.
 
 ## Estado atual
 
-CLI funcional com agente LangChain conversando com um modelo, já com a **tool de
-planilha** (`create_json`) registrada. Ela lê um CSV de `sheets/` e devolve o JSON
-inteiro para o LLM interpretar. O **parser é apenas CSV** — suporte a XLSX ainda
-não existe (ver dívidas técnicas em [`docs/agent.md`](docs/agent.md)).
+CLI funcional com agente LangChain conversando com um modelo. O agente tem
+**memória da sessão** (`InMemorySaver` do LangGraph), então cada turno enxerga os
+turnos anteriores da mesma execução, e a interface é `rich` (prompt, spinner de
+raciocínio e Painel com Markdown na resposta).
 
-`sheets/csv/` traz o escopo inicial; a planilha em `sheets/xlsx/` é o **desafio
-final** que o projeto deve ser capaz de enfrentar e hoje está fora de alcance.
+São **duas tools de planilha**:
+
+- `lista_arquivos` — descobre o que existe em `sheets/csv/` e `sheets/xlsx/`.
+- `create_json` — lê o arquivo e devolve o **JSON** inteiro para o LLM
+  interpretar.
+
+Os dois formatos são suportados: **CSV** com `csv.DictReader` e fallback de
+codificação (`utf-8-sig` → `utf-8` → `cp1252` → `latin-1`), e **XLSX** com
+`openpyxl`, devolvendo **todas as abas** do arquivo (`{nome_da_aba: [linhas]}`).
+
+`sheets/csv/` traz o escopo inicial (nível 1 da escala) e `sheets/xlsx/` traz
+planilhas de nível 2 — com várias abas. Já a planilha
+`MATRIZ ENCAMINHADA - FINAL.xlsx` (nível 4) é **legível**, mas sem tratamento de
+células mescladas e cabeçalho multinível, então ainda não é confiável para
+resposta (ver [`docs/scale_difficulties.md`](docs/scale_difficulties.md)).
 
 ## Requisitos
 
@@ -83,6 +101,10 @@ API_SELECT=openrouter   # ou groq
 | ausente        | Groq se a chave do OpenRouter for inválida; OpenRouter caso contrário |
 | qualquer outro | `UnboundLocalError` — ver [bug conhecido](docs/agent.md#seleção-de-modelo) |
 
+Os dois modelos usam `temperature=0.1`, `timeout=60000` (ms) e
+`max_tokens` de **7000** (Groq) ou **10000** (OpenRouter) — limite relevante
+porque a tool de planilha envia a planilha inteira no contexto.
+
 
 ## Uso
 
@@ -91,30 +113,45 @@ uv run nlq
 ```
 
 Isso carrega o `.env`, cria o agente e abre o chat. Digite `sair` para encerrar.
+O histórico vive em memória durante a execução: ao sair, a sessão é perdida.
 
 ## Estrutura
 
 ```
 src/nlq/
-  main.py            # entry point (script `nlq`)
+  main.py            # entry point (script `nlq`) — loop de chat com `rich`
   agent/
-    agent.py         # create_nlq_agent(): seleção de modelo + agente LangChain
+    agent.py         # create_nlq_agent(): checkpointer + seleção de modelo + agente
     prompts/         # prompt de sistema montado por concatenação
   tools/
-    extract.py       # create_json(): tool de leitura de planilha (CSV)
+    extract.py       # create_json(): tool de leitura de planilha (CSV e XLSX)
+    listar_planilhas.py  # lista_arquivos(): tool de descoberta das planilhas
+    dev_master.py    # módulo auxiliar (não é tool de planilha)
 sheets/
   csv/               # escopo inicial (nível 1)
-  xlsx/              # desafio final (nível 4)
+  xlsx/              # planilhas multi-aba (níveis 2 e 4)
 docs/
   architecture.md         # arquitetura atual e fluxo da consulta
-  agent.md                # design do agente (modelo, prompt, tool de planilha)
-  possible_implements.md  # evoluções futuras (NL2SQL, RAG, AST, memória...)
+  agent.md                # design do agente (modelo, memória, tools de planilha)
+  possible_implements.md  # plano futuro (Pandas + RAG; AST/NL2SQL condicionais...)
   scale_difficulties.md   # escala de dificuldade das planilhas (dimensiona o parser)
 ```
 
 ## Evoluções possíveis
 
-Ideias fora do escopo atual — `NL2SQL`, `RAG`, `AST`, memória de conversa,
-validação da resposta e ferramentas de esquema:
+A próxima direção é evitar que planilhas grandes sejam enviadas inteiras ao LLM
+em toda pergunta. O plano prioriza:
+
+- **execução tabular local (Pandas)** para filtros, agregações e consultas exatas;
+- **busca semântica/RAG** para localizar registros por significado;
+- uso híbrido dos dois quando a pergunta combinar semântica e cálculo.
+
+**AST** permanece como possibilidade futura caso a camada de consulta cresça a
+ponto de precisar de uma representação intermediária própria. **NL2SQL** deixa
+de ser prioridade para planilhas genéricas e fica reservado para fontes
+relacionais reais ou dados claramente relacionais.
+
+Persistência de sessão, validação de respostas e ferramentas de esquema também
+continuam como evoluções possíveis.
 
 [`docs/possible_implements.md`](docs/possible_implements.md)

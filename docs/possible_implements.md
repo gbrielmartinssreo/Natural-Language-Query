@@ -1,65 +1,462 @@
 # Implementações Possíveis
 
-Este documento reúne ideias **fora do escopo atual** do NLQ. Nada aqui está
-implementado — é um registro de evoluções candidatas, para consulta posterior.
+Este documento reúne ideias **fora do escopo atual** do NLQ e organiza a direção
+de evolução do projeto.
 
 O estado atual e a arquitetura em vigor estão em
 [`architecture.md`](architecture.md) e [`agent.md`](agent.md).
 
 ---
 
-## 1. Ferramentas de leitura e esquema
+## 1. Próxima direção: reduzir o contexto enviado ao LLM
 
-A tool de planilha atual (`create_json`) devolve o JSON da planilha inteira.
-Evoluções possíveis, com uma tool por função:
+A tool atual (`create_json`) devolve a planilha inteira em JSON. Isso funciona
+bem para arquivos pequenos e foi suficiente para validar o agente, mas não escala:
+o principal gargalo passa a ser o **volume de dados enviado ao modelo em cada
+pergunta**, não apenas o tempo de leitura do arquivo.
 
-| Ferramenta           | Função                                                    |
-|----------------------|-----------------------------------------------------------|
-| `listar_abas`        | Descreve abas/colunas disponíveis na planilha             |
-| `ler_esquema`        | Retorna tipos, cabeçalhos e hierarquia de uma aba         |
-| `consultar_dados`    | Executa consulta estruturada e retorna linhas/agregados   |
-| `buscar_texto` (RAG) | Recupera células relevantes por similaridade              |
+Cachear o XLSX em memória pode evitar releitura e parsing, mas **não resolve o
+problema principal** se o JSON completo continuar sendo enviado ao LLM.
 
-Motivo: planilhas grandes estouram o `max_tokens` se o JSON completo for enviado
-ao LLM a cada pergunta. Descobrir esquema antes de consultar reduz o payload.
-Com a tool atual, qualquer CSV já entra inteiro no contexto.
+A próxima evolução deve separar:
 
-## 2. NL2SQL / RAG / AST
+- **leitura/preparação local** — abrir e normalizar a planilha;
+- **seleção local** — localizar somente os registros necessários;
+- **LLM** — interpretar a pergunta e redigir a resposta a partir de um contexto
+  reduzido.
 
-Estratégia evolutiva para a camada de consulta:
+Ferramentas candidatas:
 
-| Técnica  | Uso                                                     | Quando entra           |
-|----------|---------------------------------------------------------|------------------------|
-| `NL2SQL` | Perguntas agregáveis/relacionais sobre tabelas           | Primeira etapa         |
-| `RAG`    | Perguntas semânticas sobre texto livre das células       | Quando o léxico variar |
-| `AST`    | Análise estruturada/estatística sobre os dados           | Consultas complexas    |
+| Ferramenta | Função |
+|---|---|
+| `listar_abas` | Descreve abas e colunas disponíveis |
+| `ler_esquema` | Retorna cabeçalhos, tipos e características da aba |
+| `consultar_dados` | Executa filtros, agregações e ordenações localmente |
+| `buscar_semantico` | Recupera registros por similaridade de significado |
 
-As técnicas podem ser combinadas: recuperar candidatos via RAG e executar a
-agregação via SQL/estruturada.
+O objetivo é que uma pergunta sobre 10 registros relevantes não obrigue o modelo
+a reler milhares de linhas.
 
-## 3. Validação da resposta (guarda-corpo)
+---
 
-Conferir se o resultado devolvido responde à pergunta, antes de responder ao
-usuário. Detecta alucinação de valores e consultas que retornam vazio sem motivo.
+## 2. Estratégia de consulta: tabular + semântica
 
-## 4. Memória de conversa
+A direção principal é uma arquitetura híbrida, porque planilhas genéricas podem
+ter tanto dados estruturados quanto campos textuais fortemente semânticos.
 
-Hoje cada pergunta é enviada isoladamente. Com `session_id`, o agente passa a
-manter contexto para consultas em múltiplos turnos ("e no mês passado?").
+```text
+Pergunta
+   ↓
+decisão de estratégia
+   ↓
+┌────────────────────┬─────────────────────┐
+│ consulta exata     │ consulta semântica  │
+│ Pandas / executor  │ embeddings / vetor  │
+└────────────────────┴─────────────────────┘
+           ↓
+      poucos dados
+           ↓
+          LLM
+```
 
-## 5. Pontos de extensão já previstos no código
+### 2.1 Pandas / execução tabular — prioridade
 
-- **Registro de ferramentas** (`tools=[create_json]` em `agent.py`) — cada técnica
-  de consulta vira uma tool do agente.
-- **Seleção de modelo** — o modelo é parametrizável em `create_nlq_agent()`; trocar
-  de LLM via OpenRouter não exige mudar o núcleo.
-- **Troca de fonte de dados** — dentro do formato CSV, trocar de planilha não
-  afeta o agente. Ampliar o parser para XLSX é o que destrava novas fontes.
+É a primeira evolução para perguntas como:
+
+- contagens;
+- filtros;
+- ordenações;
+- soma, média, mínimo e máximo;
+- agrupamentos;
+- cruzamentos simples entre dados já identificados.
+
+O objetivo não é deixar o LLM gerar código Pandas arbitrário, mas usar uma tool
+controlada que receba uma operação estruturada e execute localmente.
+
+### 2.2 Busca semântica / RAG — prioridade
+
+É indicada para planilhas com campos de texto em que a pergunta e a célula podem
+usar vocabulários diferentes, por exemplo:
+
+- "reintegração social" ↔ "apoio ao egresso";
+- "fortalecimento institucional" ↔ ações descritas sem esse termo literal;
+- localização de medidas, observações ou descrições relacionadas por significado.
+
+A unidade de indexação deve preservar o registro original e seus metadados
+(aba, linha, colunas relevantes). O vetor serve para **encontrar candidatos**;
+valores exatos, contagens e agregações continuam sendo executados sobre os dados
+estruturados.
+
+### 2.3 Consultas híbridas
+
+Perguntas podem exigir os dois mecanismos:
+
+```text
+"Entre as medidas relacionadas à reintegração,
+quantas têm meta no Ano 2?"
+```
+
+Fluxo esperado:
+
+1. busca semântica encontra os registros relacionados à reintegração;
+2. executor tabular filtra `Meta Ano 2`;
+3. executor calcula a contagem;
+4. LLM recebe apenas o resultado e as evidências necessárias.
+
+### 2.4 AST — possível, mas não prioritária
+
+Uma representação intermediária estruturada (AST/plano de consulta) pode ser útil
+no futuro se o roteamento e as operações crescerem a ponto de exigir uma linguagem
+interna comum para `filter`, `aggregate`, `sort`, `semantic_search` etc.
+
+Não é prioridade agora. Implementá-la antes dessa complexidade aparecer criaria
+uma engine de consulta antes de existir necessidade concreta.
+
+### 2.5 NL2SQL — caso especializado
+
+NL2SQL deixa de ser uma evolução principal do NLQ de planilhas.
+
+Ele é útil quando a fonte já é **relacional de verdade**, com schema estável,
+chaves e tabelas relacionadas, ou quando uma planilha excepcionalmente bem
+estruturada puder ser convertida para um banco temporário com relações claras.
+
+Para planilhas genéricas, semi-estruturadas ou sem relações formais, Pandas e
+busca semântica oferecem melhor relação entre simplicidade e utilidade.
+
+| Técnica | Prioridade | Papel |
+|---|---:|---|
+| Pandas / executor tabular | Alta | consultas exatas e agregações |
+| Busca semântica / RAG | Alta | recuperação por significado |
+| AST / plano estruturado | Posterior | organizar consultas complexas se necessário |
+| NL2SQL | Condicional | bancos relacionais ou dados claramente relacionais |
+
+---
+
+## 3. Edição assistida por IA
+
+O sistema pode permitir que o usuário modifique planilhas usando linguagem
+natural.
+
+Exemplos:
+
+- alterar valores;
+- preencher campos;
+- adicionar linhas;
+- remover registros;
+- atualizar colunas;
+- aplicar regras em várias linhas;
+- modificar fórmulas;
+- realizar ajustes de formatação.
+
+A LLM não deve editar diretamente o arquivo. Ela deve interpretar o pedido e gerar
+uma operação estruturada, que é validada e executada localmente.
+
+Exemplo conceitual:
+
+```json
+{
+  "action": "update_cells",
+  "sheet": "Alunos",
+  "where": {
+    "RA": 2026001
+  },
+  "changes": {
+    "Ativo": false
+  }
+}
+```
+
+Fluxo esperado:
+
+```text
+Usuário
+   ↓
+LLM interpreta a alteração
+   ↓
+operação estruturada
+   ↓
+validação
+   ↓
+executor local
+   ↓
+openpyxl / Pandas
+   ↓
+novo arquivo
+```
+
+Para arquivos XLSX, `openpyxl` tende a ser a principal ferramenta de edição,
+pois permite trabalhar diretamente com células, fórmulas, estilos e estrutura
+do workbook.
+
+Pandas pode continuar sendo usado para transformações tabulares em massa.
+
+### Segurança e rastreabilidade
+
+Por padrão:
+
+- não sobrescrever o arquivo original;
+- salvar uma nova versão;
+- registrar as alterações realizadas;
+- permitir visualizar um diff antes da aplicação;
+- validar aba, linha, coluna e tipos antes de editar.
+
+Isso permite transformar o NLQ de um sistema somente de consulta em um sistema de
+**consulta e manipulação de planilhas por linguagem natural**.
+
+---
+
+## 4. Dashboards automáticos
+
+A camada tabular também pode alimentar dashboards.
+
+O papel do Pandas seria preparar os dados:
+
+```text
+planilha
+   ↓
+parser
+   ↓
+Pandas
+   ↓
+filtros / agregações / métricas
+   ↓
+dashboard
+```
+
+Possíveis elementos:
+
+- indicadores e cards;
+- totais;
+- médias;
+- máximos e mínimos;
+- rankings;
+- distribuições;
+- séries temporais;
+- gráficos por categoria;
+- filtros por coluna, aba, período ou grupo.
+
+A LLM pode participar principalmente da **seleção dos indicadores relevantes**.
+
+Exemplo:
+
+```text
+Usuário:
+"crie uma visão geral dessa planilha"
+
+↓
+LLM identifica métricas úteis
+↓
+executor tabular calcula
+↓
+frontend renderiza os gráficos
+```
+
+Os valores do dashboard devem ser calculados localmente, e não pelo modelo.
+
+Assim, o mesmo motor tabular usado para responder perguntas pode servir também
+para geração de dashboards.
+
+### 4.1 Dashboard assistido por IA
+
+Uma evolução adicional é permitir perguntas como:
+
+```text
+"quais indicadores são mais importantes nessa planilha?"
+```
+
+ou:
+
+```text
+"monte um dashboard de desempenho"
+```
+
+A LLM pode produzir uma descrição estruturada:
+
+```json
+{
+  "metrics": [
+    {
+      "type": "sum",
+      "column": "Valor",
+      "title": "Valor total"
+    },
+    {
+      "type": "count",
+      "column": "Cliente",
+      "title": "Clientes"
+    }
+  ],
+  "charts": [
+    {
+      "type": "bar",
+      "group_by": "Categoria",
+      "value": "Valor"
+    }
+  ]
+}
+```
+
+O backend executa as operações com Pandas e o frontend apenas renderiza.
+
+Essa separação mantém o modelo como planejador e evita depender da LLM para
+cálculos numéricos.
+
+---
+
+## 5. Validação da resposta
+
+Conferir se o resultado devolvido responde à pergunta antes de responder ao
+usuário.
+
+Essa camada pode detectar:
+
+- valores inventados;
+- consultas que retornam vazio sem motivo aparente;
+- filtros incompatíveis com a estrutura;
+- divergências entre resultado calculado e resposta final;
+- uso de registros sem origem rastreável.
+
+A validação ganha importância quando o NLQ passa a combinar busca semântica,
+operações tabulares e edição de arquivos.
+
+---
+
+## 6. Persistência de sessão
+
+A memória **por execução** já existe: `InMemorySaver` do LangGraph, com um
+`thread_id` fixo em `main.py`.
+
+Follow-ups funcionam porque o estado volta no `invoke`.
+
+Possíveis evoluções:
+
+- checkpointer persistente (SQLite ou Postgres);
+- múltiplas threads;
+- política de tamanho do histórico;
+- resumo ou trimming de conversas longas;
+- separação entre memória conversacional e conhecimento persistente.
+
+Persistência não é prioridade enquanto o uso principal continuar sendo uma CLI
+local de uma sessão por execução.
+
+---
+
+## 7. Interface web e deploy
+
+A CLI atual pode permanecer como interface de desenvolvimento.
+
+Como a lógica principal está separada da `main.py`, uma interface web futura pode
+reutilizar o mesmo núcleo.
+
+Estrutura conceitual:
+
+```text
+core
+├── parser
+├── consulta tabular
+├── busca semântica
+├── edição
+├── geração de métricas
+└── agente
+
+interfaces
+├── CLI
+└── Web
+```
+
+Uma arquitetura futura possível:
+
+```text
+Frontend
+React / Next.js
+      ↓
+FastAPI
+      ↓
+NLQ Core
+      ↓
+Pandas / openpyxl / busca semântica
+```
+
+Uma alternativa mais simples para prototipagem seria Streamlit.
+
+A interface web poderia oferecer:
+
+- chat;
+- upload de arquivos;
+- seleção de planilha;
+- preview de abas;
+- tabelas interativas;
+- dashboard;
+- gráficos;
+- filtros;
+- histórico da conversa;
+- edição assistida;
+- preview das alterações;
+- download do arquivo modificado;
+- visualização das evidências usadas na resposta.
+
+---
+
+## 8. Pontos de extensão já previstos no código
+
+- **Registro de ferramentas** (`tools=[create_json, lista_arquivos]` em `agent.py`)
+  — cada técnica de consulta pode virar uma tool do agente.
+- **Seleção de modelo** — o modelo é parametrizável em `create_nlq_agent()`.
+- **Troca de fonte de dados** — CSV e XLSX já são lidos; outros formatos podem
+  ser adicionados posteriormente.
 - **Escopo do agente** — `prompts/specific_role.md` permite trocar o papel do
   agente sem alterar o núcleo.
+- **Interface desacoplada** — a CLI está concentrada em `main.py`, facilitando
+  futura substituição por uma API ou frontend web.
 
-## 6. Escala de dificuldade das planilhas
+---
 
-Referência para dimensionar o parser. Detalhes em
-[`scale_difficulties.md`](scale_difficulties.md) — o nível 1 (CSV limpo) é o
-alvo inicial; a planilha atual em `sheets/` é o nível 4 (desafio final).
+## 9. Escala de dificuldade das planilhas
+
+A referência para dimensionar o parser está em
+[`scale_difficulties.md`](scale_difficulties.md).
+
+Hoje:
+
+- nível 1 (CSV limpo): suportado;
+- nível 2 (XLSX simples): suportado;
+- nível 3 (XLSX semi-estruturado): lido de forma bruta;
+- nível 4 (planilha corporativa complexa): acessível, mas ainda não confiável.
+
+Melhorar o parser para mesclagens, cabeçalhos multinível e múltiplos blocos por aba
+continua sendo importante, especialmente para busca semântica e edição.
+
+---
+
+## 10. Visão de longo prazo
+
+Com essas extensões, o NLQ deixa de ser apenas um chat que lê planilhas e passa a
+funcionar como uma camada genérica de interação com dados tabulares.
+
+```text
+                    NLQ
+                     │
+        ┌────────────┼─────────────┐
+        │            │             │
+     Consulta      Edição       Dashboard
+        │            │             │
+        └───────┬────┴─────┬───────┘
+                │          │
+              Pandas    openpyxl
+                │          │
+                └────┬─────┘
+                     │
+              dados estruturados
+                     │
+         ┌───────────┴───────────┐
+         │                       │
+consulta exata             busca semântica
+         │                       │
+         └───────────┬───────────┘
+                     │
+                    LLM
+```
+
+A prioridade é manter a LLM como camada de **interpretação, planejamento e
+apresentação**, enquanto operações exatas permanecem em ferramentas
+determinísticas.
