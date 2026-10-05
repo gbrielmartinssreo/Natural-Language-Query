@@ -48,7 +48,7 @@ def create_nlq_agent():
             model_provider="groq",
             temperature=0.1,
             timeout=60000,
-            max_tokens=500,
+            max_tokens=7000,
         )
 
 
@@ -56,7 +56,7 @@ def create_nlq_agent():
         "openrouter:qwen/qwen3-30b-a3b-instruct-2507",
         temperature=0.1,
         timeout=60000,
-        max_tokens=500,
+        max_tokens=10000,
     )
 
 
