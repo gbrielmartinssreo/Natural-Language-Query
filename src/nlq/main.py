@@ -16,6 +16,12 @@ def main():
     agent = create_nlq_agent()
     console = Console()
 
+    config = {
+        "configurable": {
+            "thread_id": "default"
+        }
+    }
+
     while True:
         console.rule(style="black")
 
@@ -42,7 +48,9 @@ def main():
                             "content": user_input,
                         }
                     ]
-                }
+                },
+
+                config=config
             )
 
         response = result["messages"][-1].content

@@ -1,11 +1,11 @@
 from langchain.agents import create_agent
 from langchain.chat_models import init_chat_model
+from langgraph.checkpoint.memory import InMemorySaver
 
 import os
 import requests
 from pathlib import Path
 from dotenv import load_dotenv
-
 
 from nlq.tools.extract import create_json
 from nlq.tools.dev_master import goat
@@ -43,13 +43,15 @@ def check_openrouter_key() -> bool:
 
 def create_nlq_agent():
 
+    checkpointer = InMemorySaver()
+
     model1 = init_chat_model(
             "openai/gpt-oss-120b",
             model_provider="groq",
             temperature=0.1,
             timeout=60000,
             max_tokens=7000,
-        )
+    )
 
 
     model2 = init_chat_model(
@@ -70,5 +72,6 @@ def create_nlq_agent():
     return create_agent(
         model=model,
         tools=tools,
+        checkpointer=checkpointer,
         system_prompt=(load_prompt("prompts/system_base.md")+"\n\n"+load_prompt("prompts/specific_role.md")),
     )
