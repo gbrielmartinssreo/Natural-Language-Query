@@ -61,6 +61,12 @@ semi-estruturadas ou corporativas exigem interpretação que ainda não existe
 | Parser (XLSX)         | `src/nlq/tools/extract.py`          | Lê todas as abas com `openpyxl` e devolve um dict por aba        | **Atual**    |
 | Memória de sessão     | `src/nlq/agent/agent.py`            | `InMemorySaver` do LangGraph; acumula os turnos da execução      | **Atual**    |
 | Resposta final        | `src/nlq/main.py`                   | Texto devolvido ao usuário                                       | **Atual**    |
+| Interface (Web)       | —                                   | Chat com seleção/upload de planilha, loading e erros visuais     | **Planejado** ([#19](https://github.com/gbrielmartinssreo/Natural-Language-Query/issues/19)) |
+| Ambientes e deploy    | —                                   | `develop` (teste) e `main` (produção), com URL fixa cada          | **Planejado** ([#16](https://github.com/gbrielmartinssreo/Natural-Language-Query/issues/16)–[#18](https://github.com/gbrielmartinssreo/Natural-Language-Query/issues/18)) |
+
+A interface web e os ambientes de deploy estão **planejados**, não implementados:
+o fluxo de branches e os ambientes estão em [`development.md`](development.md) e
+o escopo da interface web em [`possible_implements.md`](possible_implements.md) §7.
 
 ## 3. Fluxo de uma pergunta
 
@@ -190,4 +196,21 @@ representação intermediária comum. NL2SQL passa a ser um caminho especializad
 adequado principalmente quando a fonte for um banco relacional real ou possuir
 relações claras.
 
-Detalhes em [`possible_implements.md`](possible_implements.md).
+### Entrega imediata: web e ambientes
+
+A milestone [MVP com web / deploy / estabilidade](https://github.com/gbrielmartinssreo/Natural-Language-Query/milestone/2)
+— uma das duas abertas no momento — complementa essa direção com entregas de
+infraestrutura e interface:
+
+- **interface web** — chat, seleção/upload de planilha, loading, exibição de
+  resposta e tratamento visual de erro (a stack ainda não foi escolhida);
+- **fluxo de branches** — `feature/* → develop → main`, com `main` protegida;
+- **ambientes** — deploy de teste em `develop` e de produção em `main`, cada um
+  com URL fixa e variáveis de ambiente próprias.
+
+Essas mudanças não alteram o núcleo (agente, tools, parser): a lógica já está
+separada da `main.py` e é reutilizável pela interface web. Detalhes em
+[`development.md`](development.md) e em [`possible_implements.md`](possible_implements.md) §7.
+
+A direção de longo prazo (Pandas, busca semântica, edição, dashboards) está em
+[`possible_implements.md`](possible_implements.md).

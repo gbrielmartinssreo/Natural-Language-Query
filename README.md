@@ -67,6 +67,33 @@ planilhas de nível 2 — com várias abas. Já a planilha
 células mescladas e cabeçalho multinível, então ainda não é confiável para
 resposta (ver [`docs/scale_difficulties.md`](docs/scale_difficulties.md)).
 
+## Próximos passos
+
+Há duas milestones abertas no momento, com issues ainda não aplicadas — é o
+plano imediato:
+
+### [MVP com foco na análise da LLM](https://github.com/gbrielmartinssreo/Natural-Language-Query/milestone/1)
+
+| Issue | Escopo |
+|-------|--------|
+| [#10](https://github.com/gbrielmartinssreo/Natural-Language-Query/issues/10) | Testes unitários para as tools existentes |
+| [#12](https://github.com/gbrielmartinssreo/Natural-Language-Query/issues/12) | Persistência de contexto e técnica de compactação de tokens |
+| [#15](https://github.com/gbrielmartinssreo/Natural-Language-Query/issues/15) | Skills de análise e listagem (formatação de listagens e passos de extração) |
+
+### [MVP com web / deploy / estabilidade](https://github.com/gbrielmartinssreo/Natural-Language-Query/milestone/2)
+
+| Issue | Escopo |
+|-------|--------|
+| [#16](https://github.com/gbrielmartinssreo/Natural-Language-Query/issues/16) | Fluxo de branches: criar `develop`, `main` como produção, proteger `main` |
+| [#17](https://github.com/gbrielmartinssreo/Natural-Language-Query/issues/17) | Ambiente de desenvolvimento: deploy ligado à `develop`, env vars de dev, URL fixa de teste |
+| [#18](https://github.com/gbrielmartinssreo/Natural-Language-Query/issues/18) | Ambiente de produção: deploy na `main`, env vars de produção, URL fixa |
+| [#19](https://github.com/gbrielmartinssreo/Natural-Language-Query/issues/19) | Interface web: chat, seleção/upload de planilha, loading, resposta e tratamento visual de erro |
+
+O fluxo de branches e os ambientes da segunda milestone estão detalhados em
+[`docs/development.md`](docs/development.md); o escopo da interface web, em
+[`docs/possible_implements.md`](docs/possible_implements.md) §7. A tecnologia da
+interface web e a plataforma de deploy ainda são **decisões pendentes**.
+
 ## Requisitos
 
 - [uv](https://docs.astral.sh/uv/)
@@ -115,6 +142,9 @@ uv run nlq
 Isso carrega o `.env`, cria o agente e abre o chat. Digite `sair` para encerrar.
 O histórico vive em memória durante a execução: ao sair, a sessão é perdida.
 
+A CLI (`rich`) é a **interface atual** — a interface web faz parte da milestone
+de web (ver [Próximos passos](#próximos-passos)).
+
 ## Estrutura
 
 ```
@@ -133,6 +163,7 @@ sheets/
 docs/
   architecture.md         # arquitetura atual e fluxo da consulta
   agent.md                # design do agente (modelo, memória, tools de planilha)
+  development.md          # plano de branches, ambientes e deploy (milestone)
   possible_implements.md  # plano futuro (Pandas + RAG; AST/NL2SQL condicionais...)
   scale_difficulties.md   # escala de dificuldade das planilhas (dimensiona o parser)
 ```

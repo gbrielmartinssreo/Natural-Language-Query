@@ -343,10 +343,53 @@ local de uma sessão por execução.
 
 ## 7. Interface web e deploy
 
+> **Planejado na milestone aberta**
+> [MVP com web / deploy / estabilidade](https://github.com/gbrielmartinssreo/Natural-Language-Query/milestone/2).
+> Nada disso está implementado — a interface atual continua sendo a CLI.
+
 A CLI atual pode permanecer como interface de desenvolvimento.
 
-Como a lógica principal está separada da `main.py`, uma interface web futura pode
-reutilizar o mesmo núcleo.
+Como a lógica principal está separada da `main.py`, a interface web pode
+reutilizar o mesmo núcleo sem alterar agente, tools ou parser.
+
+### 7.1 Escopo do MVP web (issue #19)
+
+Requisitos mínimos da
+[issue #19](https://github.com/gbrielmartinssreo/Natural-Language-Query/issues/19):
+
+- chat;
+- seleção/upload de planilha;
+- loading durante o processamento;
+- exibição da resposta;
+- tratamento visual de erro.
+
+**Stack: decisão pendente.** As duas rotas já mapeadas são:
+
+| Opção | Perfil |
+|---|---|
+| Streamlit | prototipagem rápida, pouco código |
+| FastAPI + frontend (React/Next) | mais controle, caminho já descrito abaixo |
+
+### 7.2 Fora do escopo do MVP (futuro)
+
+- preview de abas e tabelas interativas;
+- dashboard e gráficos;
+- filtros;
+- histórico da conversa além da sessão;
+- edição assistida, preview das alterações e download do arquivo modificado;
+- visualização das evidências usadas na resposta.
+
+### 7.3 Deploy
+
+Os ambientes, o fluxo de branches (`feature/* → develop → main`) e os requisitos
+de deploy (URL fixa por ambiente, variáveis de ambiente separadas) estão em
+[`development.md`](development.md) — issues
+[#16](https://github.com/gbrielmartinssreo/Natural-Language-Query/issues/16),
+[#17](https://github.com/gbrielmartinssreo/Natural-Language-Query/issues/17) e
+[#18](https://github.com/gbrielmartinssreo/Natural-Language-Query/issues/18).
+A plataforma de deploy também é decisão pendente.
+
+### 7.4 Arquitetura conceitual
 
 Estrutura conceitual:
 
@@ -378,22 +421,6 @@ Pandas / openpyxl / busca semântica
 ```
 
 Uma alternativa mais simples para prototipagem seria Streamlit.
-
-A interface web poderia oferecer:
-
-- chat;
-- upload de arquivos;
-- seleção de planilha;
-- preview de abas;
-- tabelas interativas;
-- dashboard;
-- gráficos;
-- filtros;
-- histórico da conversa;
-- edição assistida;
-- preview das alterações;
-- download do arquivo modificado;
-- visualização das evidências usadas na resposta.
 
 ---
 
