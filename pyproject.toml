@@ -9,6 +9,7 @@ authors = [
 requires-python = ">=3.14"
 dependencies = [
     "custom-tree>=1.7",
+    "deepagents>=0.7.23",
     "fastapi[standard]>=0.142.2",
     "langchain>=1.4.3",
     "langchain-groq>=1.1.3",
