@@ -14,6 +14,16 @@ load_dotenv()
 agent, checkpointer = create_nlq_agent()
 
 
+import os
+
+@app.get("/debug/env")
+def debug_env():
+    return {
+        "groq": bool(os.getenv("GROQ_API_KEY")),
+        "openrouter": bool(os.getenv("OPENROUTER_API_KEY")),
+        "api_select": os.getenv("API_SELECT"),
+    }
+
 @app.get("/health")
 def health():
     return {"status": "ok"}
