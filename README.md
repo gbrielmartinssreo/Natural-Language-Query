@@ -54,9 +54,11 @@ CLI funcional com agente LangChain conversando com um modelo. O agente tem
 turnos anteriores da mesma execução, e a interface é `rich` (prompt, spinner de
 raciocínio e Painel com Markdown na resposta).
 
-Há também uma **API FastAPI** (`src/nlq/api.py`) expondo o mesmo agente por HTTP —
-é a base da interface web (issue [#19](https://github.com/gbrielmartinssreo/Natural-Language-Query/issues/19),
-**em andamento**: o backend existe, o frontend ainda não). As duas interfaces
+Há também uma **API FastAPI** (`src/nlq/api.py`) expondo o mesmo agente por HTTP,
+que serve ao mesmo tempo a **interface web** (`frontend/`, issue
+[#19](https://github.com/gbrielmartinssreo/Natural-Language-Query/issues/19),
+**em andamento**): chat, loading, exibição de resposta e tratamento visual de
+erro já funcionam; falta a seleção/upload de planilha. As duas interfaces
 compartilham a mesma sessão (`thread_id="default"`).
 
 São **duas tools de planilha**:
@@ -95,12 +97,12 @@ andamento) — é o plano imediato:
 | [#16](https://github.com/gbrielmartinssreo/Natural-Language-Query/issues/16) | Fluxo de branches: criar `develop`, `main` como produção, proteger `main` |
 | [#17](https://github.com/gbrielmartinssreo/Natural-Language-Query/issues/17) | Ambiente de desenvolvimento: deploy ligado à `develop`, env vars de dev, URL fixa de teste |
 | [#18](https://github.com/gbrielmartinssreo/Natural-Language-Query/issues/18) | Ambiente de produção: deploy na `main`, env vars de produção, URL fixa |
-| [#19](https://github.com/gbrielmartinssreo/Natural-Language-Query/issues/19) | Interface web: chat, seleção/upload de planilha, loading, resposta e tratamento visual de erro — **em andamento** (backend FastAPI pronto, falta o frontend) |
+| [#19](https://github.com/gbrielmartinssreo/Natural-Language-Query/issues/19) | Interface web: chat, seleção/upload de planilha, loading, resposta e tratamento visual de erro — **em andamento** (chat, loading, resposta e erros prontos no `frontend/`; falta seleção/upload de planilha) |
 
 O fluxo de branches e os ambientes da segunda milestone estão detalhados em
 [`docs/development.md`](docs/development.md); o escopo da interface web, em
-[`docs/possible_implements.md`](docs/possible_implements.md) §7. A tecnologia da
-interface web e a plataforma de deploy ainda são **decisões pendentes**.
+[`docs/possible_implements.md`](docs/possible_implements.md) §7. A plataforma de
+deploy ainda é **decisão pendente**.
 
 ## Requisitos
 
@@ -143,6 +145,8 @@ porque a tool de planilha envia a planilha inteira no contexto.
 
 ## Uso
 
+### CLI
+
 ```bash
 uv run nlq
 ```
@@ -150,12 +154,24 @@ uv run nlq
 Isso carrega o `.env`, cria o agente e abre o chat. Digite `sair` para encerrar.
 O histórico vive em memória durante a execução: ao sair, a sessão é perdida.
 
-A CLI (`rich`) é a interface de desenvolvimento — a interface web faz parte da
-milestone de web (ver [Próximos passos](#próximos-passos)).
+A CLI (`rich`) é a interface de desenvolvimento.
+
+### Interface web
+
+```bash
+uv run fastapi dev    # desenvolvimento (auto-reload) — http://127.0.0.1:8000
+uv run fastapi run    # produção
+```
+
+A mesma API serve o frontend estático (`frontend/`): chat com balões de
+mensagem, markdown (tabelas e código), loading animado durante o processamento,
+indicador da planilha consultada, alternância de tema claro/escuro e status do
+backend. A resposta não usa streaming — o agente processa inteiro e devolve o
+resultado de uma vez.
 
 ### API
 
-O mesmo agente é exposto por uma API FastAPI (`src/nlq/api.py`), cujo entrypoint
+O mesmo agente é exposto pela API FastAPI (`src/nlq/api.py`), cujo entrypoint
 está declarado no `pyproject.toml`:
 
 ```toml
@@ -163,20 +179,20 @@ está declarado no `pyproject.toml`:
 entrypoint = "nlq.api:app"
 ```
 
-```bash
-uv run fastapi dev    # desenvolvimento (auto-reload) — http://127.0.0.1:8000
-uv run fastapi run    # produção
-```
-
 A documentação interativa fica em `http://127.0.0.1:8000/docs`. O `.env` é
 carregado no startup, então as mesmas chaves de API são necessárias.
 
-| Rota                      | Método | O que faz                                                        |
-|---------------------------|--------|------------------------------------------------------------------|
-| `/`                       | GET    | health check informal (`{"Hello": "World"}`)                      |
-| `/health`                 | GET    | health check (`{"status": "ok"}`)                                 |
-| `/api/chat`               | POST   | envia a pergunta ao agente e devolve `{"response": "..."}`        |
-| `/api/limpar-conversa`    | DELETE | apaga a thread `"default"` do checkpointer                        |
+| Rota                      | Método | O que faz                                                                                     |
+|---------------------------|--------|-----------------------------------------------------------------------------------------------|
+| `/`                       | GET    | serve o frontend (`frontend/index.html`, via `StaticFiles(html=True)`)                        |
+| `/health`                 | GET    | health check (`{"status": "ok"}`)                                                             |
+| `/api/chat`               | POST   | envia a pergunta (query string `?request=...`) e devolve `{"response": "...", "planilha": {...}}` |
+| `/api/limpar-conversa`    | DELETE | apaga a thread `"default"` do checkpointer                                                    |
+
+`planilha` é a última planilha lida pelo agente na sessão (`{"nome": ..., "ext": ...}`)
+ou `null` quando nenhuma foi consultada — é o que o frontend exibe no indicador
+do topo. As rotas de API são registradas **antes** do mount estático, então
+`/health` e `/api/*` têm precedência sobre `/`.
 
 A API usa o **mesmo** `thread_id="default"` da CLI: todas as requisições
 compartilham uma única sessão, e `DELETE /api/limpar-conversa` é o único caminho
@@ -187,7 +203,7 @@ para limpá-la.
 ```
 src/nlq/
   main.py            # entry point (script `nlq`) — loop de chat com `rich`
-  api.py             # API FastAPI — rotas /api/chat, /api/limpar-conversa, /health
+  api.py             # API FastAPI — /api/chat, /api/limpar-conversa, /health + serve o frontend
   agent/
     agent.py         # create_nlq_agent(): checkpointer + seleção de modelo + agente → (agente, checkpointer)
     prompts/         # prompt de sistema montado por concatenação
@@ -195,6 +211,10 @@ src/nlq/
     extract.py       # create_json(): tool de leitura de planilha (CSV e XLSX)
     listar_planilhas.py  # lista_arquivos(): tool de descoberta das planilhas
     dev_master.py    # módulo auxiliar (não é tool de planilha)
+frontend/
+  index.html         # interface web — layout (sidebar, topbar, chat, composer)
+  style.css          # tema claro/escuro, mensagens, tabelas, responsivo
+  app.js             # consumo da API, render de markdown, loading, tema e status
 sheets/
   csv/               # escopo inicial (nível 1)
   xlsx/              # planilhas multi-aba (níveis 2 e 4)

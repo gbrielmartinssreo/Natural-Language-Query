@@ -75,7 +75,7 @@ Requisitos das issues #17 e #18:
 
 A **API FastAPI** (`src/nlq/api.py`, entrypoint `[tool.fastapi]` no
 `pyproject.toml`) é o ponto de entrada natural do deploy: `fastapi run` sobe o
-servidor com a aplicação completa (agente + rotas).
+servidor com a aplicação completa (agente + rotas + frontend estático).
 
 > **Plataforma: decisão pendente.** Nenhuma plataforma foi escolhida ainda
 > (opções comuns: Render, Railway, Fly.io, Vercel+backend, entre outras). A
@@ -95,6 +95,6 @@ servidor com a aplicação completa (agente + rotas).
 
 ## 5. Relacionados
 
-- Interface web planejada: [`possible_implements.md`](possible_implements.md) §7
+- Interface web (em andamento): [`possible_implements.md`](possible_implements.md) §7
   ([issue #19](https://github.com/gbrielmartinssreo/Natural-Language-Query/issues/19))
 - Arquitetura atual: [`architecture.md`](architecture.md)

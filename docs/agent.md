@@ -165,15 +165,21 @@ em `/docs`.
 
 | Rota                   | Método | Comportamento                                                        |
 |------------------------|--------|----------------------------------------------------------------------|
-| `/`                    | GET    | `{"Hello": "World"}`                                                 |
+| `/`                    | GET    | Serve o frontend estático (`frontend/index.html` — `StaticFiles(html=True)`) |
 | `/health`              | GET    | `{"status": "ok"}`                                                   |
-| `/api/chat`            | POST   | Recebe a pergunta como corpo texto, invoca o agente e devolve `{"response": "..."}` |
+| `/api/chat`            | POST   | Recebe a pergunta na query string (`?request=...`), invoca o agente e devolve `{"response": "...", "planilha": {...} \| null}` |
 | `/api/limpar-conversa` | DELETE | `checkpointer.delete_thread("default")` → `{"status": "ok"}`         |
+
+As rotas de API são registradas **antes** do mount estático em `/`, então
+`/health`, `/api/*` e `/docs` têm precedência sobre o frontend.
 
 A rota `/api/chat` monta o mesmo `config` da CLI (`thread_id="default"`), prefixa
 a mensagem com `"\nUser: "` e lê a resposta em `result["messages"][-1].content` —
 ou seja, **a API e a CLI compartilham a sessão**: perguntas feitas por uma
-interface aparecem na outra, e a thread só é zerada pelo `DELETE`.
+interface aparecem na outra, e a thread só é zerada pelo `DELETE`. O campo
+`planilha` da resposta é preenchido por `_ultima_planilha()`, que varre os
+`tool_calls` do resultado em busca da última chamada a `create_json(name, ext)` —
+é o que a interface web mostra no indicador de planilha do topo.
 
 ## 3. Configuração do modelo
 

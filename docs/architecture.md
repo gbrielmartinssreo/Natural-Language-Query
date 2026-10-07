@@ -66,12 +66,14 @@ semi-estruturadas ou corporativas exigem interpretação que ainda não existe
 | Parser (XLSX)         | `src/nlq/tools/extract.py`          | Lê todas as abas com `openpyxl` e devolve um dict por aba        | **Atual**    |
 | Memória de sessão     | `src/nlq/agent/agent.py`            | `InMemorySaver` do LangGraph; acumula os turnos da execução      | **Atual**    |
 | Resposta final        | `src/nlq/main.py` e `src/nlq/api.py` | Texto devolvido à CLI (Painel `rich`) ou à requisição (JSON)     | **Atual**    |
-| Interface (Web)       | —                                   | Frontend de chat com seleção/upload de planilha, loading e erros visuais (o backend FastAPI já existe) | **Em andamento** ([#19](https://github.com/gbrielmartinssreo/Natural-Language-Query/issues/19)) |
+| Interface (Web)       | `frontend/`                          | Frontend de chat estático (HTML/CSS/JS puro) servido pela API: balões de mensagem, markdown, loading, indicador de planilha, tema claro/escuro e erros visuais | **Em andamento** ([#19](https://github.com/gbrielmartinssreo/Natural-Language-Query/issues/19)) |
 | Ambientes e deploy    | —                                   | `develop` (teste) e `main` (produção), com URL fixa cada          | **Planejado** ([#16](https://github.com/gbrielmartinssreo/Natural-Language-Query/issues/16)–[#18](https://github.com/gbrielmartinssreo/Natural-Language-Query/issues/18)) |
 
-O backend HTTP da interface web já está implementado (issue
-[#19](https://github.com/gbrielmartinssreo/Natural-Language-Query/issues/19) **em
-andamento**): falta o frontend e o restante do escopo da issue. Os ambientes de
+A interface web já existe: o backend HTTP (`src/nlq/api.py`) serve a API e o
+frontend estático (`frontend/`) da issue
+[#19](https://github.com/gbrielmartinssreo/Natural-Language-Query/issues/19)
+(**em andamento**): chat, loading, resposta e tratamento de erro estão prontos,
+falta a seleção/upload de planilha. Os ambientes de
 deploy seguem planejados — o fluxo de branches está em
 [`development.md`](development.md) e o escopo completo da interface web em
 [`possible_implements.md`](possible_implements.md) §7.
@@ -79,7 +81,7 @@ deploy seguem planejados — o fluxo de branches está em
 ## 3. Fluxo de uma pergunta
 
 1. **Entrada** — o usuário digita a pergunta na CLI, ou o cliente envia
-   `POST /api/chat` com o corpo da pergunta.
+   `POST /api/chat` com a pergunta na query string (`?request=...`).
 2. **Agente → LLM** — o agente junta a pergunta ao histórico da sessão
    recuperado do checkpointer e encaminha tudo ao modelo.
 3. **Decisão** — o LLM decide se precisa descobrir planilhas e/ou consultá-las.
@@ -90,7 +92,7 @@ deploy seguem planejados — o fluxo de branches está em
 6. **Resposta** — o LLM interpreta, calcula e redige a resposta final.
 7. **Checkpoint** — as mensagens do turno são gravadas na sessão.
 8. **Saída** — a resposta é impressa na CLI (Painel com Markdown) ou devolvida
-   pela API como `{"response": "..."}`.
+   pela API como `{"response": "...", "planilha": {...} | null}`.
 
 Não há etapa separada de validação nem consulta em linguagem estruturada: o LLM
 faz a interpretação e o cálculo sobre o JSON. O histórico é gerenciado pelo
@@ -213,10 +215,11 @@ A milestone [MVP com web / deploy / estabilidade](https://github.com/gbrielmarti
 infraestrutura e interface:
 
 - **interface web** — chat, seleção/upload de planilha, loading, exibição de
-  resposta e tratamento visual de erro. O **backend já existe**: a API FastAPI
-  (`src/nlq/api.py`) expõe o agente por HTTP e é o ponto de partida do frontend
-  (issue [#19](https://github.com/gbrielmartinssreo/Natural-Language-Query/issues/19),
-  em andamento); a stack da camada de UI ainda não foi escolhida;
+  resposta e tratamento visual de erro. O backend FastAPI (`src/nlq/api.py`) e o
+  frontend estático (`frontend/`) já existem — chat, loading, resposta e erros
+  estão entregues; **falta a seleção/upload de planilha** (issue
+  [#19](https://github.com/gbrielmartinssreo/Natural-Language-Query/issues/19),
+  em andamento). A interface é HTML/CSS/JS puro, sem build step;
 - **fluxo de branches** — `feature/* → develop → main`, com `main` protegida;
 - **ambientes** — deploy de teste em `develop` e de produção em `main`, cada um
   com URL fixa e variáveis de ambiente próprias.
