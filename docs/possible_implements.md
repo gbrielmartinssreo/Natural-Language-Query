@@ -324,7 +324,8 @@ operações tabulares e edição de arquivos.
 ## 6. Persistência de sessão
 
 A memória **por execução** já existe: `InMemorySaver` do LangGraph, com um
-`thread_id` fixo em `main.py`.
+`thread_id` fixo em `"default"` — compartilhado pela CLI (`main.py`) e pela API
+(`api.py`), que enxergam a mesma sessão.
 
 Follow-ups funcionam porque o estado volta no `invoke`.
 
@@ -336,39 +337,53 @@ Possíveis evoluções:
 - resumo ou trimming de conversas longas;
 - separação entre memória conversacional e conhecimento persistente.
 
-Persistência não é prioridade enquanto o uso principal continuar sendo uma CLI
-local de uma sessão por execução.
+Persistência não é prioridade enquanto existir uma única sessão por execução,
+mas ganha relevância justamente porque o frontend web (issue
+[#19](https://github.com/gbrielmartinssreo/Natural-Language-Query/issues/19))
+já é servido pela API: aí o histórico precisa sobreviver ao processo e
+separar usuários.
 
 ---
 
 ## 7. Interface web e deploy
 
-> **Planejado na milestone aberta**
+> **Em andamento na milestone aberta**
 > [MVP com web / deploy / estabilidade](https://github.com/gbrielmartinssreo/Natural-Language-Query/milestone/2).
-> Nada disso está implementado — a interface atual continua sendo a CLI.
+> O backend (API FastAPI, `src/nlq/api.py`) e o frontend (`frontend/`) já
+> existem; falta a seleção/upload de planilha para fechar a issue #19. A
+> interface de desenvolvimento continua sendo a CLI.
 
-A CLI atual pode permanecer como interface de desenvolvimento.
+A CLI atual permanece como interface de desenvolvimento.
 
-Como a lógica principal está separada da `main.py`, a interface web pode
-reutilizar o mesmo núcleo sem alterar agente, tools ou parser.
+Como a lógica principal está separada da `main.py`, a API e o frontend
+reutilizam o mesmo núcleo sem alterar agente, tools ou parser.
 
 ### 7.1 Escopo do MVP web (issue #19)
 
 Requisitos mínimos da
 [issue #19](https://github.com/gbrielmartinssreo/Natural-Language-Query/issues/19):
 
-- chat;
-- seleção/upload de planilha;
-- loading durante o processamento;
-- exibição da resposta;
-- tratamento visual de erro.
+- [x] chat;
+- [ ] seleção/upload de planilha;
+- [x] loading durante o processamento;
+- [x] exibição da resposta;
+- [x] tratamento visual de erro.
 
-**Stack: decisão pendente.** As duas rotas já mapeadas são:
+**Backend: implementado** (`src/nlq/api.py`, com `POST /api/chat` — que também
+devolve a `planilha` consultada —, `DELETE /api/limpar-conversa` e `GET /health`;
+entrypoint `nlq.api:app` em `[tool.fastapi]` no `pyproject.toml`).
 
-| Opção | Perfil |
+**Frontend: implementado** (`frontend/`, HTML/CSS/JS puro servido pelo
+`StaticFiles` da própria API — sem build step e sem framework):
+
+| Arquivo | Papel |
 |---|---|
-| Streamlit | prototipagem rápida, pouco código |
-| FastAPI + frontend (React/Next) | mais controle, caminho já descrito abaixo |
+| `index.html` | layout: sidebar, topbar (chip da planilha + status), área de chat e composer |
+| `style.css` | tema claro/escuro (CSS vars + `data-theme`), balões, tabelas grandes com scroll, responsivo |
+| `app.js` | consome a API, renderiza markdown (marked + DOMPurify), loading animado, tema e status do backend |
+
+A stack mais pesada (Streamlit ou React/Next, mapeadas abaixo) ficou como
+evolução possível — o MVP não exigia build tooling.
 
 ### 7.2 Fora do escopo do MVP (futuro)
 
@@ -377,7 +392,9 @@ Requisitos mínimos da
 - filtros;
 - histórico da conversa além da sessão;
 - edição assistida, preview das alterações e download do arquivo modificado;
-- visualização das evidências usadas na resposta.
+- visualização das evidências usadas na resposta;
+- streaming da resposta (hoje a API responde de uma vez, e o frontend mostra o
+  loading enquanto espera).
 
 ### 7.3 Deploy
 
@@ -403,24 +420,25 @@ core
 └── agente
 
 interfaces
-├── CLI
-└── Web
+├── CLI    (main.py — atual)
+├── API    (api.py — atual)
+└── Web    (frontend/ — atual; upload de planilha pendente)
 ```
 
-Uma arquitetura futura possível:
+Arquitetura atual, com a camada FastAPI servindo API e frontend:
 
 ```text
-Frontend
-React / Next.js
+Frontend                  (frontend/ — HTML/CSS/JS puro, atual)
       ↓
-FastAPI
+FastAPI                (src/nlq/api.py — rotas + StaticFiles)
       ↓
 NLQ Core
       ↓
-Pandas / openpyxl / busca semântica
+openpyxl / csv / busca semântica (futura)
 ```
 
-Uma alternativa mais simples para prototipagem seria Streamlit.
+Streamlit ou React/Next permanecem como alternativa de evolução caso a UI
+cresça além do que o HTML/CSS/JS puro sustenta.
 
 ---
 
@@ -433,8 +451,8 @@ Uma alternativa mais simples para prototipagem seria Streamlit.
   ser adicionados posteriormente.
 - **Escopo do agente** — `prompts/specific_role.md` permite trocar o papel do
   agente sem alterar o núcleo.
-- **Interface desacoplada** — a CLI está concentrada em `main.py`, facilitando
-  futura substituição por uma API ou frontend web.
+- **Interfaces desacopladas** — a CLI está concentrada em `main.py` e a API em
+  `api.py`; o frontend (`frontend/`) consome a API sem tocar no núcleo.
 
 ---
 

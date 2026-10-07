@@ -74,4 +74,4 @@ def create_nlq_agent():
         tools=tools,
         checkpointer=checkpointer,
         system_prompt=(load_prompt("prompts/system_base.md")+"\n\n"+load_prompt("prompts/specific_role.md")),
-    )
+    ),checkpointer
