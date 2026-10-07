@@ -1,1 +1,1 @@
-web: uv run fastapi run
+web: uv run fastapi run --port $PORT
