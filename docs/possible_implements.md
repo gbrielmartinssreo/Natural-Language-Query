@@ -324,7 +324,8 @@ operações tabulares e edição de arquivos.
 ## 6. Persistência de sessão
 
 A memória **por execução** já existe: `InMemorySaver` do LangGraph, com um
-`thread_id` fixo em `main.py`.
+`thread_id` fixo em `"default"` — compartilhado pela CLI (`main.py`) e pela API
+(`api.py`), que enxergam a mesma sessão.
 
 Follow-ups funcionam porque o estado volta no `invoke`.
 
@@ -336,21 +337,26 @@ Possíveis evoluções:
 - resumo ou trimming de conversas longas;
 - separação entre memória conversacional e conhecimento persistente.
 
-Persistência não é prioridade enquanto o uso principal continuar sendo uma CLI
-local de uma sessão por execução.
+Persistência não é prioridade enquanto existir uma única sessão por execução,
+mas ganha relevância quando o frontend web (issue
+[#19](https://github.com/gbrielmartinssreo/Natural-Language-Query/issues/19))
+passar a ser servido pela API: aí o histórico precisa sobreviver ao processo e
+separar usuários.
 
 ---
 
 ## 7. Interface web e deploy
 
-> **Planejado na milestone aberta**
+> **Em andamento na milestone aberta**
 > [MVP com web / deploy / estabilidade](https://github.com/gbrielmartinssreo/Natural-Language-Query/milestone/2).
-> Nada disso está implementado — a interface atual continua sendo a CLI.
+> O **backend já existe**: a API FastAPI (`src/nlq/api.py`) expõe o agente por
+> HTTP. Falta o frontend e o restante do escopo da issue #19; a interface de
+> desenvolvimento continua sendo a CLI.
 
-A CLI atual pode permanecer como interface de desenvolvimento.
+A CLI atual permanece como interface de desenvolvimento.
 
-Como a lógica principal está separada da `main.py`, a interface web pode
-reutilizar o mesmo núcleo sem alterar agente, tools ou parser.
+Como a lógica principal está separada da `main.py`, a API e o futuro frontend
+reutilizam o mesmo núcleo sem alterar agente, tools ou parser.
 
 ### 7.1 Escopo do MVP web (issue #19)
 
@@ -363,12 +369,16 @@ Requisitos mínimos da
 - exibição da resposta;
 - tratamento visual de erro.
 
-**Stack: decisão pendente.** As duas rotas já mapeadas são:
+**Backend: FastAPI definido** (`src/nlq/api.py`, com `POST /api/chat`,
+`DELETE /api/limpar-conversa` e `GET /health`; entrypoint
+`nlq.api:app` em `[tool.fastapi]` no `pyproject.toml`).
+
+**Camada de UI: decisão pendente.** As duas rotas mapeadas são:
 
 | Opção | Perfil |
 |---|---|
 | Streamlit | prototipagem rápida, pouco código |
-| FastAPI + frontend (React/Next) | mais controle, caminho já descrito abaixo |
+| Frontend (React/Next) sobre a API FastAPI | mais controle, caminho já descrito abaixo |
 
 ### 7.2 Fora do escopo do MVP (futuro)
 
@@ -403,24 +413,25 @@ core
 └── agente
 
 interfaces
-├── CLI
-└── Web
+├── CLI    (main.py — atual)
+├── API    (api.py — atual)
+└── Web    (frontend — pendente)
 ```
 
-Uma arquitetura futura possível:
+Arquitetura alvo, com a camada FastAPI **já implementada** e o frontend pendente:
 
 ```text
 Frontend
-React / Next.js
+React / Next.js        (pendente)
       ↓
-FastAPI
+FastAPI                (src/nlq/api.py — atual)
       ↓
 NLQ Core
       ↓
 Pandas / openpyxl / busca semântica
 ```
 
-Uma alternativa mais simples para prototipagem seria Streamlit.
+Uma alternativa mais simples para a UI seria Streamlit.
 
 ---
 
@@ -433,8 +444,8 @@ Uma alternativa mais simples para prototipagem seria Streamlit.
   ser adicionados posteriormente.
 - **Escopo do agente** — `prompts/specific_role.md` permite trocar o papel do
   agente sem alterar o núcleo.
-- **Interface desacoplada** — a CLI está concentrada em `main.py`, facilitando
-  futura substituição por uma API ou frontend web.
+- **Interfaces desacopladas** — a CLI está concentrada em `main.py` e a API em
+  `api.py`; o frontend web pode se conectar à API sem tocar no núcleo.
 
 ---
 

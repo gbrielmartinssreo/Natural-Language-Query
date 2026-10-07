@@ -10,6 +10,10 @@ interpreta, calcula e redige a resposta final.
 O agente também mantém **memória da sessão**: o histórico de turnos é gravado por
 um checkpointer do LangGraph e devolvido ao LLM a cada pergunta.
 
+O mesmo agente é exposto por **duas interfaces**: a CLI (`src/nlq/main.py`) e uma
+**API FastAPI** (`src/nlq/api.py`). As duas compartilham a sessão em memória —
+mesmo `thread_id`, mesmo checkpointer.
+
 ```mermaid
 ---
 config:
@@ -52,6 +56,7 @@ semi-estruturadas ou corporativas exigem interpretação que ainda não existe
 | Componente            | Onde                                | Papel                                                            | Estado       |
 |-----------------------|-------------------------------------|------------------------------------------------------------------|--------------|
 | Interface (CLI)       | `src/nlq/main.py`                   | Recebe a pergunta e imprime a resposta (`rich`)                  | **Atual**    |
+| API (FastAPI)         | `src/nlq/api.py`                    | Expõe o agente por HTTP: `POST /api/chat`, `DELETE /api/limpar-conversa`, `GET /health` | **Atual**    |
 | Agente (LangChain)    | `src/nlq/agent/agent.py`            | Orquestra o ciclo LLM ↔ ferramenta                               | **Atual**    |
 | LLM (Groq/OpenRouter) | `src/nlq/agent/agent.py`            | Decide o que consultar, interpreta os dados e redige a resposta   | **Atual**    |
 | Prompt de sistema     | `src/nlq/agent/prompts/`            | Dois arquivos Markdown concatenados em `system_prompt`           | **Atual**    |
@@ -60,17 +65,21 @@ semi-estruturadas ou corporativas exigem interpretação que ainda não existe
 | Parser (CSV)          | `src/nlq/tools/extract.py`          | Lê o CSV com `csv.DictReader` e fallback de codificação   | **Atual**    |
 | Parser (XLSX)         | `src/nlq/tools/extract.py`          | Lê todas as abas com `openpyxl` e devolve um dict por aba        | **Atual**    |
 | Memória de sessão     | `src/nlq/agent/agent.py`            | `InMemorySaver` do LangGraph; acumula os turnos da execução      | **Atual**    |
-| Resposta final        | `src/nlq/main.py`                   | Texto devolvido ao usuário                                       | **Atual**    |
-| Interface (Web)       | —                                   | Chat com seleção/upload de planilha, loading e erros visuais     | **Planejado** ([#19](https://github.com/gbrielmartinssreo/Natural-Language-Query/issues/19)) |
+| Resposta final        | `src/nlq/main.py` e `src/nlq/api.py` | Texto devolvido à CLI (Painel `rich`) ou à requisição (JSON)     | **Atual**    |
+| Interface (Web)       | —                                   | Frontend de chat com seleção/upload de planilha, loading e erros visuais (o backend FastAPI já existe) | **Em andamento** ([#19](https://github.com/gbrielmartinssreo/Natural-Language-Query/issues/19)) |
 | Ambientes e deploy    | —                                   | `develop` (teste) e `main` (produção), com URL fixa cada          | **Planejado** ([#16](https://github.com/gbrielmartinssreo/Natural-Language-Query/issues/16)–[#18](https://github.com/gbrielmartinssreo/Natural-Language-Query/issues/18)) |
 
-A interface web e os ambientes de deploy estão **planejados**, não implementados:
-o fluxo de branches e os ambientes estão em [`development.md`](development.md) e
-o escopo da interface web em [`possible_implements.md`](possible_implements.md) §7.
+O backend HTTP da interface web já está implementado (issue
+[#19](https://github.com/gbrielmartinssreo/Natural-Language-Query/issues/19) **em
+andamento**): falta o frontend e o restante do escopo da issue. Os ambientes de
+deploy seguem planejados — o fluxo de branches está em
+[`development.md`](development.md) e o escopo completo da interface web em
+[`possible_implements.md`](possible_implements.md) §7.
 
 ## 3. Fluxo de uma pergunta
 
-1. **Entrada** — o usuário digita a pergunta na CLI.
+1. **Entrada** — o usuário digita a pergunta na CLI, ou o cliente envia
+   `POST /api/chat` com o corpo da pergunta.
 2. **Agente → LLM** — o agente junta a pergunta ao histórico da sessão
    recuperado do checkpointer e encaminha tudo ao modelo.
 3. **Decisão** — o LLM decide se precisa descobrir planilhas e/ou consultá-las.
@@ -80,11 +89,12 @@ o escopo da interface web em [`possible_implements.md`](possible_implements.md) 
 5. **Volta ao LLM** — o JSON é devolvido ao modelo como contexto.
 6. **Resposta** — o LLM interpreta, calcula e redige a resposta final.
 7. **Checkpoint** — as mensagens do turno são gravadas na sessão.
-8. **Saída** — a resposta é impressa para o usuário.
+8. **Saída** — a resposta é impressa na CLI (Painel com Markdown) ou devolvida
+   pela API como `{"response": "..."}`.
 
 Não há etapa separada de validação nem consulta em linguagem estruturada: o LLM
 faz a interpretação e o cálculo sobre o JSON. O histórico é gerenciado pelo
-checkpointer, não por código de conversação na CLI.
+checkpointer, não por código de conversação na CLI nem na API.
 
 
 ### Fluxo alvo para escala
@@ -203,13 +213,16 @@ A milestone [MVP com web / deploy / estabilidade](https://github.com/gbrielmarti
 infraestrutura e interface:
 
 - **interface web** — chat, seleção/upload de planilha, loading, exibição de
-  resposta e tratamento visual de erro (a stack ainda não foi escolhida);
+  resposta e tratamento visual de erro. O **backend já existe**: a API FastAPI
+  (`src/nlq/api.py`) expõe o agente por HTTP e é o ponto de partida do frontend
+  (issue [#19](https://github.com/gbrielmartinssreo/Natural-Language-Query/issues/19),
+  em andamento); a stack da camada de UI ainda não foi escolhida;
 - **fluxo de branches** — `feature/* → develop → main`, com `main` protegida;
 - **ambientes** — deploy de teste em `develop` e de produção em `main`, cada um
   com URL fixa e variáveis de ambiente próprias.
 
 Essas mudanças não alteram o núcleo (agente, tools, parser): a lógica já está
-separada da `main.py` e é reutilizável pela interface web. Detalhes em
+separada da `main.py` e é reutilizada pela CLI e pela API. Detalhes em
 [`development.md`](development.md) e em [`possible_implements.md`](possible_implements.md) §7.
 
 A direção de longo prazo (Pandas, busca semântica, edição, dashboards) está em

@@ -73,6 +73,10 @@ Requisitos das issues #17 e #18:
 - **URL fixa** por ambiente, que não muda a cada deploy;
 - configuração de variáveis de ambiente por ambiente.
 
+A **API FastAPI** (`src/nlq/api.py`, entrypoint `[tool.fastapi]` no
+`pyproject.toml`) é o ponto de entrada natural do deploy: `fastapi run` sobe o
+servidor com a aplicação completa (agente + rotas).
+
 > **Plataforma: decisão pendente.** Nenhuma plataforma foi escolhida ainda
 > (opções comuns: Render, Railway, Fly.io, Vercel+backend, entre outras). A
 > escolha não afeta este documento — os requisitos acima valem para qualquer

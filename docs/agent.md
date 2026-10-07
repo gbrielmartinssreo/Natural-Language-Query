@@ -42,21 +42,28 @@ elif os.getenv("API_SELECT") == "openrouter" or check_openrouter_key():
 
 tools = [create_json, lista_arquivos]
 
-return create_agent(
-    model=model,
-    tools=tools,
-    checkpointer=checkpointer,
-    system_prompt=(
-        load_prompt("prompts/system_base.md")
-        + "\n\n"
-        + load_prompt("prompts/specific_role.md")
+return (
+    create_agent(
+        model=model,
+        tools=tools,
+        checkpointer=checkpointer,
+        system_prompt=(
+            load_prompt("prompts/system_base.md")
+            + "\n\n"
+            + load_prompt("prompts/specific_role.md")
+        ),
     ),
+    checkpointer,
 )
 ```
 
 > **Atenção** — os dois modelos são construídos incondicionalmente, antes da
 > escolha. Sem `GROQ_API_KEY`, a construção do modelo Groq levanta `GroqError` e a
 > CLI não inicia, mesmo com `API_SELECT=openrouter`.
+
+A função devolve uma **tupla `(agente, checkpointer)`**. Os dois consumidores
+desempacotam o retorno: `main.py` (CLI) e `api.py` (API FastAPI) — este último
+precisa do checkpointer para `DELETE /api/limpar-conversa` apagar a thread.
 
 ### Memória de sessão
 
@@ -81,7 +88,10 @@ Consequências:
   então follow-ups ("e no mês passado?") funcionam sem código de histórico na CLI;
 - o estado fica **em RAM**: encerrar o processo descarta a sessão;
 - o `thread_id` é fixo em `"default"`, logo há **uma única sessão** por execução —
-  não há como manter duas conversas simultâneas.
+  não há como manter duas conversas simultâneas;
+- o mesmo checkpointer é usado pela **API** (`src/nlq/api.py`): CLI e API
+  enxergam a mesma thread, e `DELETE /api/limpar-conversa` chama
+  `checkpointer.delete_thread("default")` para limpá-la.
 
 ### Seleção de modelo
 
@@ -137,6 +147,33 @@ result = agent.invoke(
 O `config` é o que ativa o checkpointer: sem ele a invoke roda sem memória. A
 interface não monta histórico manualmente — o LangGraph reconstrói a partir do
 estado salvo. `"sair"`, `"exit"` e `"quit"` encerram o loop.
+
+### Interface (API)
+
+`src/nlq/api.py` cria o FastAPI `app` e o agente no **import do módulo**
+(`agent, checkpointer = create_nlq_agent()`), com o entrypoint declarado no
+`pyproject.toml`:
+
+```toml
+[tool.fastapi]
+entrypoint = "nlq.api:app"
+```
+
+Execução: `uv run fastapi dev` (desenvolvimento) ou `uv run fastapi run`
+(produção) — a `fastapi[standard]` resolve o servidor (Uvicorn) e a documentação
+em `/docs`.
+
+| Rota                   | Método | Comportamento                                                        |
+|------------------------|--------|----------------------------------------------------------------------|
+| `/`                    | GET    | `{"Hello": "World"}`                                                 |
+| `/health`              | GET    | `{"status": "ok"}`                                                   |
+| `/api/chat`            | POST   | Recebe a pergunta como corpo texto, invoca o agente e devolve `{"response": "..."}` |
+| `/api/limpar-conversa` | DELETE | `checkpointer.delete_thread("default")` → `{"status": "ok"}`         |
+
+A rota `/api/chat` monta o mesmo `config` da CLI (`thread_id="default"`), prefixa
+a mensagem com `"\nUser: "` e lê a resposta em `result["messages"][-1].content` —
+ou seja, **a API e a CLI compartilham a sessão**: perguntas feitas por uma
+interface aparecem na outra, e a thread só é zerada pelo `DELETE`.
 
 ## 3. Configuração do modelo
 
