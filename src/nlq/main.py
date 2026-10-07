@@ -13,7 +13,7 @@ from rich.rule import Rule
 def main():
     load_dotenv()
 
-    agent = create_nlq_agent()
+    agent, checkpointer = create_nlq_agent()
     console = Console()
 
     config = {
