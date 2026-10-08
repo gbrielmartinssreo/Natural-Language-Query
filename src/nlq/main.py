@@ -1,6 +1,8 @@
 from nlq.agent.agent import create_nlq_agent
 from dotenv import load_dotenv
 
+import time
+
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.prompt import Prompt
@@ -31,6 +33,7 @@ def main():
             console.print("\n[dim]Encerrando[/dim]")
             break
 
+        t_agent = time.perf_counter()
         with Live(
             Spinner(
                 "dots",
@@ -52,6 +55,7 @@ def main():
 
                 config=config
             )
+        print(f"[PERF] agent.invoke: {time.perf_counter() - t_agent:.2f}s")
 
         response = result["messages"][-1].content
 
