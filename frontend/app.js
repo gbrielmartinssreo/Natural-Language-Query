@@ -49,6 +49,17 @@ let planilhaAtual = JSON.parse(
 
 let enviando = false;
 
+let threadId =
+  localStorage.getItem("thread_id");
+
+if (!threadId) {
+  threadId = crypto.randomUUID();
+  localStorage.setItem(
+    "thread_id",
+    threadId
+  );
+}
+
 
 function salvar() {
   localStorage.setItem(
@@ -244,14 +255,17 @@ async function enviar(texto) {
   mostrarLoading(bolha);
 
   try {
-    const url =
-      `${API_URL}${ROTA_CHAT}` +
-      `?request=${encodeURIComponent(texto)}`;
-
     const r = await fetch(
-      url,
+      `${API_URL}${ROTA_CHAT}`,
       {
         method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          message: texto,
+          thread_id: threadId,
+        }),
       }
     );
 
@@ -424,6 +438,12 @@ async function limparHistorico() {
       API_URL + ROTA_LIMPAR,
       {
         method: "DELETE",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          thread_id: threadId,
+        }),
       }
     );
 
@@ -432,6 +452,12 @@ async function limparHistorico() {
         "Erro " + r.status
       );
     }
+
+    threadId = crypto.randomUUID();
+    localStorage.setItem(
+      "thread_id",
+      threadId
+    );
 
     mensagens = [];
 

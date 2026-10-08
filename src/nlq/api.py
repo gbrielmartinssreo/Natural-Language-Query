@@ -5,8 +5,18 @@ from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 
 from nlq.agent.agent import create_nlq_agent
+
+
+class ChatRequest(BaseModel):
+    message: str
+    thread_id: str
+
+
+class LimparConversaRequest(BaseModel):
+    thread_id: str
 
 
 # api.py -> nlq -> src -> raiz do projeto
@@ -55,10 +65,10 @@ def _ultima_planilha(result) -> dict | None:
 
 
 @app.post("/api/chat")
-def chat(request: str):
+def chat(request: ChatRequest):
     config = {
         "configurable": {
-            "thread_id": "default",
+            "thread_id": request.thread_id,
         }
     }
 
@@ -76,7 +86,7 @@ def chat(request: str):
             + "\n"
         )
 
-        user_input = f"\nUser: {request}"
+        user_input = f"\nUser: {request.message}"
 
         result = agent.invoke(
             {
@@ -116,8 +126,8 @@ def chat(request: str):
 
 
 @app.delete("/api/limpar-conversa")
-def clear_chat():
-    checkpointer.delete_thread("default")
+def clear_chat(request: LimparConversaRequest):
+    checkpointer.delete_thread(request.thread_id)
 
     return {
         "status": "ok",
