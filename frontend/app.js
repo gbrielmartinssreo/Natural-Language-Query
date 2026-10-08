@@ -49,6 +49,17 @@ let planilhaAtual = JSON.parse(
 
 let enviando = false;
 
+let threadId =
+  localStorage.getItem("thread_id");
+
+if (!threadId) {
+  threadId = crypto.randomUUID();
+  localStorage.setItem(
+    "thread_id",
+    threadId
+  );
+}
+
 
 function salvar() {
   localStorage.setItem(
@@ -244,14 +255,17 @@ async function enviar(texto) {
   mostrarLoading(bolha);
 
   try {
-    const url =
-      `${API_URL}${ROTA_CHAT}` +
-      `?request=${encodeURIComponent(texto)}`;
-
     const r = await fetch(
-      url,
+      `${API_URL}${ROTA_CHAT}`,
       {
         method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          message: texto,
+          thread_id: threadId,
+        }),
       }
     );
 
@@ -275,7 +289,60 @@ async function enviar(texto) {
 
     let buffer = "";
     let respostaFinal = "";
+    let recebeuResultado = false;
+    let falha = null;
 
+    function processarEvento(dados) {
+      if (!dados || !dados.type) {
+        return;
+      }
+
+      if (dados.type === "status") {
+        const conteudo = (
+          dados.content || "processando"
+        ).trim();
+
+        bolha.textContent =
+          conteudo === "processando"
+            ? "Processando..."
+            : conteudo.charAt(0).toUpperCase() +
+              conteudo.slice(1) +
+              "...";
+
+        el.scroll.scrollTop =
+          el.scroll.scrollHeight;
+
+        return;
+      }
+
+      if (dados.type === "result") {
+        recebeuResultado = true;
+        respostaFinal = dados.response || "";
+
+        bolha.innerHTML = textoSeguro(
+          respostaFinal
+        );
+
+        if ("planilha" in dados) {
+          atualizarPlanilha(dados.planilha);
+        }
+
+        el.scroll.scrollTop =
+          el.scroll.scrollHeight;
+
+        return;
+      }
+
+      if (dados.type === "error") {
+        falha =
+          dados.message ||
+          "Não foi possível concluir a consulta.";
+      }
+    }
+
+    // Lê o stream até o fim, processando eventos
+    // NDJSON linha a linha. O buffer mantém JSONs
+    // que cheguem fragmentados entre chunks.
     while (true) {
       const {
         value,
@@ -304,42 +371,12 @@ async function enviar(texto) {
           continue;
         }
 
-        const dados =
-          JSON.parse(linha);
-
-        if (
-          dados.type === "status"
-        ) {
-          bolha.textContent =
-            dados.content === "processando"
-              ? "Processando..."
-              : dados.content;
-
-          el.scroll.scrollTop =
-            el.scroll.scrollHeight;
-        }
-
-        if (
-          dados.type === "result"
-        ) {
-          respostaFinal =
-            dados.response || "";
-
-          bolha.innerHTML =
-            textoSeguro(
-              respostaFinal
-            );
-
-          if (
-            "planilha" in dados
-          ) {
-            atualizarPlanilha(
-              dados.planilha
-            );
-          }
-
-          el.scroll.scrollTop =
-            el.scroll.scrollHeight;
+        try {
+          processarEvento(
+            JSON.parse(linha)
+          );
+        } catch {
+          // Linha inválida: ignora sem quebrar o fluxo.
         }
       }
     }
@@ -347,28 +384,25 @@ async function enviar(texto) {
     // Segurança para caso o último JSON venha
     // sem \n no final.
     if (buffer.trim()) {
-      const dados =
-        JSON.parse(buffer);
-
-      if (
-        dados.type === "result"
-      ) {
-        respostaFinal =
-          dados.response || "";
-
-        bolha.innerHTML =
-          textoSeguro(
-            respostaFinal
-          );
-
-        if (
-          "planilha" in dados
-        ) {
-          atualizarPlanilha(
-            dados.planilha
-          );
-        }
+      try {
+        processarEvento(
+          JSON.parse(buffer)
+        );
+      } catch {
+        // ignora
       }
+
+      buffer = "";
+    }
+
+    // A stream encerrou sem o evento final.
+    if (!recebeuResultado && !falha) {
+      falha =
+        "A conexão foi encerrada antes do fim da resposta.";
+    }
+
+    if (falha) {
+      throw new Error(falha);
     }
 
     if (respostaFinal) {
@@ -424,6 +458,12 @@ async function limparHistorico() {
       API_URL + ROTA_LIMPAR,
       {
         method: "DELETE",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          thread_id: threadId,
+        }),
       }
     );
 
@@ -432,6 +472,12 @@ async function limparHistorico() {
         "Erro " + r.status
       );
     }
+
+    threadId = crypto.randomUUID();
+    localStorage.setItem(
+      "thread_id",
+      threadId
+    );
 
     mensagens = [];
 
