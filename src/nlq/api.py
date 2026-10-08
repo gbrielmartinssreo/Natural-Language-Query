@@ -1,4 +1,5 @@
 import json
+import time
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -78,6 +79,7 @@ def chat(request: str):
 
         user_input = f"\nUser: {request}"
 
+        t_agent = time.perf_counter()
         result = agent.invoke(
             {
                 "messages": [
@@ -89,6 +91,7 @@ def chat(request: str):
             },
             config=config,
         )
+        print(f"[PERF] agent.invoke: {time.perf_counter() - t_agent:.2f}s", flush=True)
 
         response = result["messages"][-1].content
         planilha = _ultima_planilha(result)
