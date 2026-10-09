@@ -1134,6 +1134,7 @@ dependencies = [
     { name = "openpyxl" },
     { name = "python-dotenv" },
     { name = "rich" },
+    { name = "xldetect" },
 ]
 
 [package.metadata]
@@ -1147,6 +1148,7 @@ requires-dist = [
     { name = "openpyxl", specifier = ">=3.1.5" },
     { name = "python-dotenv", specifier = ">=1.2.3" },
     { name = "rich", specifier = ">=15.0.0" },
+    { name = "xldetect", specifier = ">=1.0.1" },
 ]
 
 [[package]]
@@ -1948,6 +1950,18 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/49/b2/b6987faf330f5af5c787a2610124c2e8403d51724f9001ec4fff6311fe7a/websockets-16.1.1-cp314-cp314t-win32.whl", hash = "sha256:8483c2096363120eea8b07c06ae7304d520f686665fffd4811fad423930a65d7", size = 179729, upload-time = "2026-07-17T22:50:53.269Z" },
     { url = "https://files.pythonhosted.org/packages/a2/6e/fbac6ed878dd362fbad7d415fa4f84d38e3e33fed8cde45c64e783acf826/websockets-16.1.1-cp314-cp314t-win_amd64.whl", hash = "sha256:bcce07e23e5769375158f5efdcdafa8d5cd014b93c6683865b840ed65b96f231", size = 180072, upload-time = "2026-07-17T22:50:54.969Z" },
     { url = "https://files.pythonhosted.org/packages/be/4d/2d0d67834092e354d2b0498f014a41249a89556bc406cf86f3e1557bb463/websockets-16.1.1-py3-none-any.whl", hash = "sha256:6abbd3e82c731c8e531714466acd5d87b5e88ac3243465337ba71d68e23ae7e3", size = 173814, upload-time = "2026-07-17T22:51:04.184Z" },
+]
+
+[[package]]
+name = "xldetect"
+version = "1.0.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "openpyxl" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/b6/3f/0db39635a79a5c3fa2b14aeb5f42741d4c1d374e98e040e59ca251a93b4d/xldetect-1.0.1.tar.gz", hash = "sha256:c02065073e8c4f1f5343990dbcb1b3f35c7c7e4f17081c901b72cd198e8333f4", size = 37134, upload-time = "2026-06-22T09:42:20.524Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d9/8c/3dcab2d060da7a541f9cae6fafd9e4fed1cfe6c619f045d856a8e09d9d47/xldetect-1.0.1-py3-none-any.whl", hash = "sha256:223da69cfbece732a77936e25da525a53eb838ff6626091cda119c7b7ee96180", size = 27879, upload-time = "2026-06-22T09:42:19.069Z" },
 ]
 
 [[package]]
