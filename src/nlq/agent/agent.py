@@ -10,6 +10,7 @@ from dotenv import load_dotenv
 from nlq.tools.extract import create_json
 from nlq.tools.dev_master import goat
 from nlq.tools.listar_planilhas import lista_arquivos
+from nlq.tools.schema_info import consultar_schema
 
 load_dotenv()
 
@@ -69,6 +70,7 @@ def create_nlq_agent():
         create_json,
         goat,
         lista_arquivos,
+        consultar_schema,
     ]
 
     agent = create_deep_agent(

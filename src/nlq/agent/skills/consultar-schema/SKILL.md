@@ -1,0 +1,83 @@
+---
+name: consultar-schema
+description: Use quando a pergunta sobre uma planilha puder ser respondida só com a estrutura (abas, regiões tabulares, cabeçalhos, nomes de colunas), sem ler os registros. Exemplos - quais abas existem, quais colunas tem uma aba, como a planilha está organizada, em quais abas existe uma coluna. Prefira esta skill a create_json nesses casos.
+---
+
+# Consultar o schema de uma planilha
+
+A ferramenta `consultar_schema` devolve a **estrutura** de uma planilha sem
+ler os registros. É rápida e barata: a resposta tem poucas linhas, mesmo
+para planilhas grandes. Use-a **antes** de `create_json` sempre que a
+pergunta não depender dos valores das células.
+
+## Quando usar
+
+Use `consultar_schema` para perguntas como:
+
+- Quais abas existem na planilha `matriz`?
+- Quais colunas existem na aba `Eixo 1`?
+- Como a planilha está organizada?
+- Quais regiões tabulares foram detectadas? Onde fica o cabeçalho?
+- Em quais abas existe uma coluna chamada `Responsável`?
+
+## Quando NÃO usar
+
+Use `create_json` (e não esta ferramenta) quando a resposta depender de
+valores: filtrar linhas, contar registros, somar, listar quem tem certo
+status, buscar um nome ou uma data. Se a pergunta misturar estrutura e
+valores, chame `consultar_schema` primeiro para confirmar abas e colunas e
+depois `create_json`.
+
+Se você não souber o nome do arquivo, use `lista_arquivos` antes.
+
+## Como chamar
+
+`consultar_schema(name, ext, aba=None)`
+
+- `name`: nome do arquivo sem extensão (`matriz`).
+- `ext`: `xlsx` ou `csv`.
+- `aba` (opcional): nome de uma aba. Informe quando a pergunta for sobre
+  uma aba específica; a resposta fica menor. Maiúsculas e minúsculas são
+  ignoradas. Se a aba não existir, o erro lista as abas disponíveis.
+
+Para perguntas sobre a planilha inteira ("em quais abas existe a coluna X?",
+"como está organizada?"), chame **sem** `aba`: uma só chamada traz todas as
+abas.
+
+## Como ler a resposta
+
+Para cada aba, a resposta lista as regiões tabulares detectadas:
+
+```
+Aba 'Eixo 1': 2 regiões
+  Região 1: A1:D20 (linhas 1 a 20, colunas 1 a 4)
+    cabeçalho na linha 1; dados a partir da linha 2
+    colunas (4): ["Nome", "Responsável", "coluna_3", "Status"]
+```
+
+- A faixa (`A1:D20`) e os números de linha/coluna delimitam a região.
+- Uma aba pode ter várias regiões (tabelas empilhadas ou lado a lado);
+  cada uma tem suas próprias colunas.
+- `sem cabeçalho detectado` significa que a primeira linha da região também
+  é dado; as colunas têm nomes gerados.
+- `coluna_N` é um nome **gerado** (cabeçalho ausente ou vazio), com N sendo
+  o número da coluna na aba. Não é um título real da planilha.
+- `nenhuma região tabular detectada` indica aba vazia ou sem estrutura de
+  tabela.
+- Ao responder "em quais abas existe a coluna X", compare os nomes de
+  coluna de todas as abas e regiões, ignorando diferenças entre maiúsculas
+  e minúsculas, e cite a aba e a região onde ela aparece.
+
+## CSV
+
+CSV não tem abas nem regiões, então não existe schema estrutural. A
+ferramenta informa isso explicitamente e não lista colunas. Para conhecer
+as colunas de um CSV, use `create_json`.
+
+## Cuidados
+
+- Não invente colunas, abas ou valores que não apareçam na resposta.
+- A resposta não contém registros. Nunca responda sobre conteúdo de células
+  com base nela.
+- Se a pergunta exigir valores, diga que vai consultar os dados e use
+  `create_json`.
