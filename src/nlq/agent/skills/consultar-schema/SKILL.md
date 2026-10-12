@@ -1,34 +1,26 @@
 ---
 name: consultar-schema
-description: Use quando a pergunta sobre uma planilha puder ser respondida só com a estrutura (abas, regiões tabulares, cabeçalhos, nomes de colunas), sem ler os registros. Exemplos - quais abas existem, quais colunas tem uma aba, como a planilha está organizada, em quais abas existe uma coluna. Prefira esta skill a create_json nesses casos.
+description: Use quando a pergunta sobre uma planilha puder ser respondida só com a estrutura (abas, regiões tabulares, cabeçalhos, nomes de colunas), sem ler os registros. Exemplos - quais abas existem, quais colunas tem uma aba, como a planilha está organizada, em quais abas existe uma coluna.
 ---
 
 # Consultar o schema de uma planilha
 
-A ferramenta `consultar_schema` devolve a **estrutura** de uma planilha sem
-ler os registros. É rápida e barata: a resposta tem poucas linhas, mesmo
-para planilhas grandes. Use-a **antes** de `create_json` sempre que a
-pergunta não depender dos valores das células.
+A ferramenta consultar_schema identifica a estrutura da planilha sem retornar todos os registros.
 
 ## Quando usar
 
 Use `consultar_schema` para perguntas como:
 
-- Quais abas existem na planilha `matriz`?
-- Quais colunas existem na aba `Eixo 1`?
+- Quais abas existem?
+- Quais colunas existem em determinada aba?
 - Como a planilha está organizada?
-- Quais regiões tabulares foram detectadas? Onde fica o cabeçalho?
-- Em quais abas existe uma coluna chamada `Responsável`?
+- Em quais abas existe determinada coluna?
 
 ## Quando NÃO usar
-
-Use `create_json` (e não esta ferramenta) quando a resposta depender de
-valores: filtrar linhas, contar registros, somar, listar quem tem certo
-status, buscar um nome ou uma data. Se a pergunta misturar estrutura e
-valores, chame `consultar_schema` primeiro para confirmar abas e colunas e
-depois `create_json`.
-
-Se você não souber o nome do arquivo, use `lista_arquivos` antes.
+- Para encontrar iniciativas relacionadas a um assunto: use buscar_semantico.
+- Para contar, somar ou filtrar todos os registros: use uma ferramenta de consulta estruturada, quando disponível.
+- Para analisar todos os dados em conjunto: considere create_json, se a extração completa for realmente necessária.
+Se a pergunta exigir estrutura e conteúdo, consulte o schema somente quando isso ajudar a localizar ou interpretar os dados.
 
 ## Como chamar
 
@@ -71,8 +63,7 @@ Aba 'Eixo 1': 2 regiões
 ## CSV
 
 CSV não tem abas nem regiões, então não existe schema estrutural. A
-ferramenta informa isso explicitamente e não lista colunas. Para conhecer
-as colunas de um CSV, use `create_json`.
+ferramenta informa isso explicitamente e não lista colunas.
 
 ## Cuidados
 
@@ -80,4 +71,4 @@ as colunas de um CSV, use `create_json`.
 - A resposta não contém registros. Nunca responda sobre conteúdo de células
   com base nela.
 - Se a pergunta exigir valores, diga que vai consultar os dados e use
-  `create_json`.
+- Não use o schema sozinho para responder perguntas sobre valores das células.

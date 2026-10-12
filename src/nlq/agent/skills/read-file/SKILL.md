@@ -1,84 +1,37 @@
 ---
 name: read-file
-description: Use esta skill quando o usuário pedir para abrir, ler, mostrar o conteúdo, consultar, analisar, resumir, comparar ou extrair informações de um arquivo, planilha, Excel, XLSX, XLS ou CSV. Sempre use lista_arquivos primeiro para localizar o arquivo correto e obter seu caminho. Depois use create_json para extrair os dados. Se houver mais de um arquivo plausível e não for possível determinar com segurança qual o usuário deseja, peça confirmação antes de abrir.
+description: Use quando o usuário pedir para mostrar o conteúdo ou fazer um extração ampla de informações. Sempre use lista_arquivos primeiro para localizar o arquivo correto e obter seu caminho. Depois use create_json para extrair os dados. Se houver mais de um arquivo plausível e não for possível determinar com segurança qual o usuário deseja, peça confirmação antes de abrir.
 ---
 
 # Leitura e análise de arquivos
 
-Para qualquer operação que dependa do conteúdo de um arquivo, localizar primeiro o arquivo correto e somente depois extrair seus dados.
+Localize o arquivo solicitado antes de consultar seu conteúdo. Depois, selecione a ferramenta adequada à intenção da pergunta.
 
-## Fluxo obrigatório
+## Fluxo
 
-1. Usar `lista_arquivos`.
-2. Procurar o arquivo solicitado nos resultados.
-3. Se nenhum arquivo corresponder:
-   - não usar `create_json`;
-   - informar que o arquivo não foi encontrado;
-   - mostrar correspondências semelhantes, se existirem;
-   - aguardar o usuário indicar um arquivo válido.
-4. Se houver múltiplas correspondências plausíveis:
-   - não escolher arbitrariamente;
-   - mostrar as opções;
-   - pedir confirmação.
-5. Se houver uma única correspondência clara:
-   - obter o caminho;
-   - usar `create_json`;
-   - continuar a leitura ou análise.
+1. Use `lista_arquivos` para localizar o arquivo.
+2. Se não houver correspondência, informe que o arquivo não foi encontrado.
+3. Se houver múltiplas correspondências plausíveis, peça confirmação.
+4. Se houver uma correspondência clara, escolha a ferramenta de consulta apropriada.
 
-## Regras de identificação
+## Escolha da ferramenta
 
-Considere correspondência clara quando:
+- **Estrutura da planilha:** `consultar_schema`.
+- **Busca de informações por significado:** `buscar_semantico`.
+- **Extração ampla dos registros:** `create_json`, quando a pergunta realmente exigir acesso ao conjunto completo de dados.
+- **Contagens, somas, filtros exatos e comparações completas:** use uma ferramenta de consulta estruturada, quando disponível.
 
-- o nome informado corresponder exatamente a um arquivo;
-- houver apenas um arquivo cujo nome seja compatível com o pedido;
-- o contexto da conversa identificar inequivocamente o arquivo.
+Não use `create_json` por padrão para toda pergunta sobre conteúdo. A extração completa pode aumentar desnecessariamente o contexto enviado à LLM.
 
-Considere correspondência ambígua quando:
+## Regras de análise
 
-- houver arquivos com nomes semelhantes;
-- houver versões diferentes do mesmo arquivo;
-- houver o mesmo nome em pastas diferentes;
-- o usuário usar uma descrição genérica que possa indicar mais de um arquivo.
+- Não invente informações que não estejam sustentadas pelos dados.
+- Não considere uma busca semântica uma consulta exaustiva.
+- Não responda a cálculos exatos usando apenas os primeiros resultados semânticos.
+- Preserve os valores originais, incluindo `n/a`.
+- Se os dados recuperados forem insuficientes, faça outra consulta ou informe a limitação.
+- Não afirme ter consultado dados que nenhuma ferramenta retornou.
 
-## Regras de segurança
+## Arquivos ambíguos
 
-- Nunca inventar o caminho de um arquivo.
-- Nunca chamar `create_json` antes de localizar o arquivo com `lista_arquivos`.
-- Nunca analisar conteúdo sem antes extraí-lo com `create_json`.
-- Não assumir qual arquivo o usuário quis dizer quando houver ambiguidade.
-- Não alegar ter lido um arquivo se `create_json` não tiver sido utilizado com sucesso.
-
-## Quando o arquivo não for encontrado
-
-Após usar `lista_arquivos`, se nenhum arquivo corresponder ao pedido do usuário:
-
-1. Não chamar `create_json`.
-2. Não inventar caminhos ou nomes de arquivos.
-3. Informar claramente que o arquivo solicitado não foi encontrado.
-4. Se existirem arquivos com nomes parecidos, mostrar apenas as opções mais prováveis.
-5. Se não houver nenhuma opção parecida, informar que não há correspondência entre os arquivos disponíveis.
-6. Se o usuário tiver informado apenas parte do nome, permitir que ele escolha entre as correspondências encontradas.
-7. Somente continuar a leitura após o usuário indicar ou confirmar um arquivo válido.
-
-## Exemplo
-
-Usuário:
-"abre a planilha de vendas"
-
-Resultado de `lista_arquivos`:
-- financeiro.xlsx
-- vendas_2025.csv
-- vendas_2026.csv
-
-Comportamento:
-- não escolher automaticamente entre `vendas_2025.csv` e `vendas_2026.csv`;
-- mostrar as duas opções;
-- pedir confirmação do usuário.
-
-Se o resultado for:
-- financeiro.xlsx
-- alunos.csv
-
-Comportamento:
-- informar que nenhuma planilha de vendas foi encontrada;
-- não chamar `create_json`.
+Se existirem várias versões ou arquivos plausíveis, peça ao usuário que escolha antes de prosseguir.
