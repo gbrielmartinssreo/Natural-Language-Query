@@ -47,11 +47,21 @@ def create_nlq_agent():
 
     checkpointer = InMemorySaver()
 
+    # `timeout` tem unidade diferente por integração:
+    # - langchain-groq -> segundos (repassado ao SDK Groq / httpx)
+    # - langchain-openrouter -> milissegundos (vira `timeout_ms` no SDK)
+    # Ambos ficam em ~60 s por chamada ao modelo. Esse limite é por
+    # chamada, não para a execução inteira do agente.
+    #
+    # Limitação: os clientes HTTP (httpx/openai, síncronos) não
+    # expõem cancelamento de uma requisição já em andamento. O
+    # cancelamento do NLQ só impede as próximas etapas — a chamada
+    # ao provedor já enviada termina e tem sua resposta descartada.
     model1 = init_chat_model(
         "openai/gpt-oss-120b",
         model_provider="groq",
         temperature=0.1,
-        timeout=60000,
+        timeout=60,
         max_tokens=7000,
     )
 

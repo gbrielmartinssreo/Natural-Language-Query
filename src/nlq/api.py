@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import queue
@@ -6,10 +7,12 @@ import time
 from pathlib import Path
 
 from dotenv import load_dotenv
-from fastapi import FastAPI
-from fastapi.responses import StreamingResponse
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from langchain_core.messages import ToolMessage
+from langgraph.errors import GraphDrained
+from langgraph.runtime import RunControl
 from pydantic import BaseModel
 
 from nlq.agent.agent import create_nlq_agent
@@ -22,6 +25,9 @@ KEEPALIVE_S = 10
 
 # Tamanho máximo da fila entre worker e gerador.
 FILA_MAX = 64
+
+# Intervalo entre verificações de desconexão do cliente.
+POLL_S = 0.1
 
 MENSAGEM_ERRO = "Não foi possível concluir a consulta."
 
@@ -43,6 +49,13 @@ load_dotenv()
 app = FastAPI()
 
 agent, checkpointer = create_nlq_agent()
+
+# Conversas com uma consulta em andamento.
+#
+# A limpeza do histórico é bloqueada enquanto a consulta roda,
+# para não apagar um thread que o agente ainda está usando.
+_consultas_ativas: set[str] = set()
+_consultas_lock = threading.Lock()
 
 
 @app.get("/health")
@@ -184,8 +197,115 @@ def _texto_final(mensagem) -> str:
     return str(content)
 
 
+def _executar_agente(
+    agente,
+    entrada: dict,
+    config: dict,
+    publicar,
+    cancelado: threading.Event,
+    control: RunControl,
+) -> None:
+    """
+    Executa o agente em thread separada.
+
+    Importante:
+    não colocamos o estado completo do LangGraph
+    na fila a cada evento.
+
+    A fila recebe apenas pequenos status.
+
+    O cancelamento é cooperativo: `control.request_drain()`
+    faz o LangGraph parar no próximo limite de superstep,
+    sem matar a thread.
+    """
+
+    try:
+
+        ultimo_estado = None
+
+        t_agent = time.perf_counter()
+
+        for estado in agente.stream(
+            entrada,
+            config=config,
+            stream_mode="values",
+            control=control,
+        ):
+
+            if cancelado.is_set():
+                break
+
+            ultimo_estado = estado
+
+            status = _status_do_estado(
+                estado
+            )
+
+            publicar(
+                (
+                    "status",
+                    status,
+                )
+            )
+
+        duracao = (
+            time.perf_counter()
+            - t_agent
+        )
+
+        print(
+            f"[PERF] agent.stream: "
+            f"{duracao:.2f}s",
+            flush=True,
+        )
+
+        if cancelado.is_set():
+            return
+
+        #
+        # Apenas o estado FINAL é enviado
+        # pela fila.
+        #
+        publicar(
+            (
+                "fim",
+                ultimo_estado,
+            )
+        )
+
+    except GraphDrained as exc:
+
+        #
+        # Cancelamento cooperativo: o cliente desconectou
+        # e pedimos o drain. Não é uma falha inesperada.
+        #
+        print(
+            f"[CANCEL] execução interrompida: {exc}",
+            flush=True,
+        )
+
+    except Exception:
+
+        if cancelado.is_set():
+            return
+
+        logger.exception(
+            "Erro durante o streaming do agente"
+        )
+
+        publicar(
+            (
+                "erro",
+                None,
+            )
+        )
+
+
 @app.post("/api/chat")
-def chat(request: ChatRequest):
+async def chat(
+    request: ChatRequest,
+    http_request: Request,
+):
 
     config = {
         "configurable": {
@@ -204,19 +324,15 @@ def chat(request: ChatRequest):
         ]
     }
 
-    def generate():
+    async def generate():
 
         #
-        # PRIMEIRO BYTE
+        # Registra a consulta como ativa enquanto o stream existir.
         #
-        # Sai imediatamente para evitar H12.
-        #
-        yield _linha(
-            {
-                "type": "status",
-                "content": "processando",
-            }
-        )
+        with _consultas_lock:
+            _consultas_ativas.add(
+                request.thread_id
+            )
 
         #
         # Comunicação entre:
@@ -231,7 +347,15 @@ def chat(request: ChatRequest):
             maxsize=FILA_MAX
         )
 
-        parar = threading.Event()
+        #
+        # Cancelamento POR EXECUÇÃO.
+        #
+        # Cada consulta cria o seu próprio Event e o seu
+        # próprio RunControl — nada é compartilhado entre
+        # consultas diferentes.
+        #
+        cancelado = threading.Event()
+        control = RunControl()
 
         def publicar(item) -> None:
             """
@@ -239,7 +363,7 @@ def chat(request: ChatRequest):
             indefinidamente caso o cliente desconecte.
             """
 
-            while not parar.is_set():
+            while not cancelado.is_set():
 
                 try:
                     fila.put(
@@ -252,96 +376,57 @@ def chat(request: ChatRequest):
                 except queue.Full:
                     continue
 
-        def executar() -> None:
-            """
-            Executa o agente em thread separada.
-
-            Importante:
-            não colocamos o estado completo do LangGraph
-            na fila a cada evento.
-
-            A fila recebe apenas pequenos status.
-            """
-
-            try:
-
-                ultimo_estado = None
-
-                t_agent = time.perf_counter()
-
-                for estado in agent.stream(
-                    entrada,
-                    config=config,
-                    stream_mode="values",
-                ):
-
-                    ultimo_estado = estado
-
-                    status = _status_do_estado(
-                        estado
-                    )
-
-                    publicar(
-                        (
-                            "status",
-                            status,
-                        )
-                    )
-
-                duracao = (
-                    time.perf_counter()
-                    - t_agent
-                )
-
-                print(
-                    f"[PERF] agent.stream: "
-                    f"{duracao:.2f}s",
-                    flush=True,
-                )
-
-                #
-                # Apenas o estado FINAL é enviado
-                # pela fila.
-                #
-                publicar(
-                    (
-                        "fim",
-                        ultimo_estado,
-                    )
-                )
-
-            except Exception:
-
-                logger.exception(
-                    "Erro durante o streaming do agente"
-                )
-
-                publicar(
-                    (
-                        "erro",
-                        None,
-                    )
-                )
-
-        #
-        # Inicia agente em paralelo.
-        #
-        threading.Thread(
-            target=executar,
-            daemon=True,
-        ).start()
-
         ultimo_status = "processando"
+        ultimo_ping = time.monotonic()
 
         try:
 
+            #
+            # PRIMEIRO BYTE
+            #
+            # Sai imediatamente para evitar H12.
+            #
+            yield _linha(
+                {
+                    "type": "status",
+                    "content": "processando",
+                }
+            )
+
+            #
+            # Inicia agente em paralelo.
+            #
+            threading.Thread(
+                target=_executar_agente,
+                args=(
+                    agent,
+                    entrada,
+                    config,
+                    publicar,
+                    cancelado,
+                    control,
+                ),
+                daemon=True,
+            ).start()
+
             while True:
+
+                #
+                # Cliente desconectou: para de enviar e
+                # pede o cancelamento cooperativo.
+                #
+                if await http_request.is_disconnected():
+
+                    print(
+                        "[STREAM] cliente desconectou",
+                        flush=True,
+                    )
+
+                    return
 
                 try:
 
-                    tipo, payload = fila.get(
-                        timeout=KEEPALIVE_S
-                    )
+                    tipo, payload = fila.get_nowait()
 
                 except queue.Empty:
 
@@ -349,27 +434,37 @@ def chat(request: ChatRequest):
                     # KEEP-ALIVE
                     #
                     # Se nenhuma etapa do agente produzir
-                    # evento em 10 segundos, enviamos algo
+                    # evento por KEEPALIVE_S, enviamos algo
                     # mesmo assim.
                     #
                     # Isso evita o H15 por conexão ociosa.
                     #
+                    if (
+                        time.monotonic()
+                        - ultimo_ping
+                    ) >= KEEPALIVE_S:
 
-                    print(
-                        f"[KEEPALIVE] enviado "
-                        f"status={ultimo_status}",
-                        flush=True,
-                    )
+                        ultimo_ping = time.monotonic()
 
-                    yield _linha(
-                        {
-                            "type": "ping",
-                            "status":
-                                ultimo_status,
-                        }
-                    )
+                        print(
+                            f"[KEEPALIVE] enviado "
+                            f"status={ultimo_status}",
+                            flush=True,
+                        )
+
+                        yield _linha(
+                            {
+                                "type": "ping",
+                                "status":
+                                    ultimo_status,
+                            }
+                        )
+
+                    await asyncio.sleep(POLL_S)
 
                     continue
+
+                ultimo_ping = time.monotonic()
 
                 #
                 # STATUS DO AGENTE
@@ -497,12 +592,46 @@ def chat(request: ChatRequest):
 
                     return
 
+        except (asyncio.CancelledError, GeneratorExit):
+
+            #
+            # Encerramento da conexão. Não é uma falha
+            # inesperada — apenas propagamos depois da limpeza.
+            #
+            print(
+                "[STREAM] requisição cancelada pelo cliente",
+                flush=True,
+            )
+
+            raise
+
         finally:
 
             #
             # Cliente desconectou ou a resposta terminou.
             #
-            parar.set()
+            # Sinaliza o worker e pede o drain cooperativo para
+            # que ele não inicie novas etapas.
+            #
+            cancelado.set()
+
+            control.request_drain(
+                "client_disconnect"
+            )
+
+            #
+            # Libera eventos pendentes da fila abandonada.
+            #
+            try:
+                while True:
+                    fila.get_nowait()
+            except queue.Empty:
+                pass
+
+            with _consultas_lock:
+                _consultas_ativas.discard(
+                    request.thread_id
+                )
 
             print(
                 "[STREAM] encerrado",
@@ -525,6 +654,28 @@ def chat(request: ChatRequest):
 def clear_chat(
     request: LimparConversaRequest,
 ):
+
+    with _consultas_lock:
+        ativa = (
+            request.thread_id
+            in _consultas_ativas
+        )
+
+    #
+    # Não apaga a conversa enquanto o agente usa o thread.
+    #
+    if ativa:
+
+        return JSONResponse(
+            status_code=409,
+            content={
+                "status": "erro",
+                "message": (
+                    "Há uma consulta em andamento "
+                    "para esta conversa."
+                ),
+            },
+        )
 
     checkpointer.delete_thread(
         request.thread_id

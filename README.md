@@ -138,9 +138,11 @@ API_SELECT=openrouter   # ou groq
 | ausente        | Groq se a chave do OpenRouter for inválida; OpenRouter caso contrário |
 | qualquer outro | `UnboundLocalError` — ver [bug conhecido](docs/agent.md#seleção-de-modelo) |
 
-Os dois modelos usam `temperature=0.1`, `timeout=60000` (ms) e
-`max_tokens` de **7000** (Groq) ou **10000** (OpenRouter) — limite relevante
-porque a tool de planilha envia a planilha inteira no contexto.
+Os dois modelos usam `temperature=0.1` e `max_tokens` de **7000** (Groq) ou
+**10000** (OpenRouter) — limite relevante porque a tool de planilha envia a
+planilha inteira no contexto. O `timeout` fica em ~60 s por chamada ao modelo,
+com unidades distintas por integração: **60 s** no Groq e **60000 ms** no
+OpenRouter.
 
 
 ## Uso

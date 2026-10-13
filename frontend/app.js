@@ -35,6 +35,7 @@ const el = {
   chat: $("chat"),
   input: $("input"),
   sendBtn: $("sendBtn"),
+  stopBtn: $("stopBtn"),
   scroll: document.querySelector(".scroll"),
 };
 
@@ -48,6 +49,9 @@ let planilhaAtual = JSON.parse(
 );
 
 let enviando = false;
+
+// Controlador da consulta ativa (null quando ocioso).
+let controladorAtual = null;
 
 let threadId =
   localStorage.getItem("thread_id");
@@ -225,8 +229,17 @@ async function enviar(texto) {
 
   enviando = true;
 
+  let cancelado = false;
+
+  const controlador = new AbortController();
+  controladorAtual = controlador;
+
   el.sendBtn.disabled = true;
   el.sendBtn.classList.add("sending");
+
+  el.stopBtn.hidden = false;
+
+  el.clearHistory.disabled = true;
 
   el.input.disabled = true;
   el.input.value = "";
@@ -262,6 +275,7 @@ async function enviar(texto) {
         headers: {
           "Content-Type": "application/json",
         },
+        signal: controlador.signal,
         body: JSON.stringify({
           message: texto,
           thread_id: threadId,
@@ -293,6 +307,14 @@ async function enviar(texto) {
     let falha = null;
 
     function processarEvento(dados) {
+      //
+      // Depois do cancelamento, ignora eventos tardios para
+      // não sobrescrever a mensagem de interrupção.
+      //
+      if (cancelado) {
+        return;
+      }
+
       if (!dados || !dados.type) {
         return;
       }
@@ -413,22 +435,39 @@ async function enviar(texto) {
     }
 
   } catch (erro) {
-    bolha
-      .closest(".msg")
-      .classList.add("error");
+    const msg = bolha.closest(".msg");
 
-    bolha.textContent =
-      "Não consegui falar com o servidor. (" +
-      erro.message +
-      ")";
+    if (erro && erro.name === "AbortError") {
+      //
+      // Interrupção pedida pelo próprio usuário:
+      // não é erro de conexão.
+      //
+      msg.classList.add("interrupted");
+
+      bolha.textContent =
+        "Consulta interrompida.";
+
+    } else {
+      msg.classList.add("error");
+
+      bolha.textContent =
+        "Não consegui falar com o servidor. (" +
+        erro.message +
+        ")";
+    }
   } finally {
     salvar();
 
     enviando = false;
+    cancelado = true;
+    controladorAtual = null;
 
     el.sendBtn.classList.remove(
       "sending"
     );
+
+    el.stopBtn.hidden = true;
+    el.clearHistory.disabled = false;
 
     el.input.disabled = false;
 
@@ -443,6 +482,14 @@ async function enviar(texto) {
 }
 
 
+// ====== INTERROMPER CONSULTA ======
+function abortarConsulta() {
+  if (controladorAtual) {
+    controladorAtual.abort();
+  }
+}
+
+
 // ====== LIMPAR HISTÓRICO ======
 async function limparHistorico() {
   if (
@@ -451,6 +498,14 @@ async function limparHistorico() {
     )
   ) {
     return;
+  }
+
+  //
+  // Se houver consulta em andamento, interrompe antes para
+  // não apagar um thread que o agente ainda está usando.
+  //
+  if (enviando) {
+    abortarConsulta();
   }
 
   try {
@@ -468,6 +523,13 @@ async function limparHistorico() {
     );
 
     if (!r.ok) {
+      if (r.status === 409) {
+        throw new Error(
+          "Há uma consulta em andamento. " +
+          "Interrompa-a antes de limpar."
+        );
+      }
+
       throw new Error(
         "Erro " + r.status
       );
@@ -583,6 +645,12 @@ el.sendBtn.addEventListener(
       el.input.value
     );
   }
+);
+
+
+el.stopBtn.addEventListener(
+  "click",
+  abortarConsulta
 );
 
 
