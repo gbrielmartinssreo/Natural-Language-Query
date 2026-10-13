@@ -1,6 +1,6 @@
 ---
 name: buscar-semantico
-description: Use buscar_semantico para encontrar registros de planilhas relacionados ao significado de uma pergunta, especialmente perguntas abertas, conceituais ou sobre iniciativas, medidas, problemas e objetivos.
+description: Use buscar_semantico apenas quando a pergunta depender de significado, sinônimos ou interpretação conceitual de um tema, e não quando os critérios puderem ser verificados diretamente nas colunas (nesse caso, use consultar_dados).
 ---
 
 # Busca semântica em planilhas
@@ -11,11 +11,10 @@ Ela retorna os trechos encontrados, suas abas de origem e suas pontuações de s
 
 ## Quando usar
 
-- Encontrar iniciativas relacionadas a um tema.
-- Identificar medidas que atendam a determinado objetivo.
-- Localizar registros usando palavras diferentes das utilizadas na planilha.
-- Encontrar ações relacionadas a uma necessidade descrita em linguagem natural.
-- Descobrir quais registros são relevantes para uma pergunta aberta.
+- Relacionar um tema a registros usando significado, sinônimos ou paráfrases.
+- Localizar registros cujas palavras diferem das utilizadas na planilha.
+- Interpretar uma necessidade descrita em linguagem natural sem termos exatos.
+- Descobrir quais registros são conceitualmente relevantes para uma pergunta aberta.
 
 ## Quando não usar como única ferramenta
 
@@ -54,10 +53,23 @@ A busca semântica encontra registros relevantes, mas não garante que todos os 
 
 ## Prioridade e economia de chamadas
 
-Para consultas por assunto, use esta ferramenta antes de considerar create_json.
-Se os resultados sustentarem a resposta, responda sem extrair todos os dados.
-Não execute consultar_schema antes desta ferramenta por rotina.
-Use top_k=5 inicialmente. Aumente ou refine somente se faltar evidência relevante.
-Não use os cinco resultados como resumo garantido de toda a planilha.
-Para perguntas gerais, dê uma resposta curta e informe quando a visão for parcial.
-Não exponha ferramentas ou detalhes internos ao usuário, salvo pedido técnico.
+- Use buscar_semantico quando a pergunta exigir
+  interpretação de significado, conceitos,
+  sinônimos ou relações semânticas.
+- Não utilize RAG como etapa obrigatória antes
+  de consultar_dados.
+- Se a pergunta envolver condições verificáveis
+  diretamente nas colunas, prefira consultar_dados.
+- Não utilize RAG para contagens, rankings ou
+  agregações exaustivas.
+- Comece com top_k=5 e aumente somente quando
+  houver necessidade de mais evidências.
+- Não repita buscas que já forneceram informações
+  suficientes.
+- Não trate os resultados recuperados como
+  representação completa da planilha.
+- Se uma consulta exigir semântica e cálculo,
+  combine buscar_semantico e consultar_dados,
+  respeitando as limitações de cobertura.
+- Preserve as referências e abas dos registros.
+- Responda proporcionalmente ao pedido.

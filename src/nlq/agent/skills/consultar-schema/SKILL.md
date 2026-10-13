@@ -75,6 +75,6 @@ ferramenta informa isso explicitamente e não lista colunas.
 
 ## Escolha e resposta
 
-Perguntas sobre assuntos, medidas, iniciativas e metas específicas devem começar por buscar_semantico, sem consulta estrutural obrigatória.
+Escolha a ferramenta pela natureza da pergunta: consultar_dados para critérios verificáveis diretamente nas colunas e buscar_semantico para significado ou paráfrases, sem consulta estrutural obrigatória.
 Para “sobre o que é a planilha?”, não confunda descrição da estrutura com compreensão do conteúdo. O schema sozinho não sustenta afirmações sobre valores.
 Responda somente com os detalhes estruturais pedidos. Não liste todos os intervalos e cabeçalhos se o usuário só pediu uma visão breve.
