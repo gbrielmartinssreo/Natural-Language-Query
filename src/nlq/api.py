@@ -4,9 +4,6 @@ import logging
 import queue
 import threading
 import time
-from pathlib import Path
-
-from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -16,6 +13,7 @@ from langgraph.runtime import RunControl
 from pydantic import BaseModel
 
 from nlq.agent.agent import create_nlq_agent
+from nlq.paths import frontend_dir, load_env
 
 
 logger = logging.getLogger("nlq.api")
@@ -41,10 +39,10 @@ class LimparConversaRequest(BaseModel):
     thread_id: str
 
 
-# api.py -> nlq -> src -> raiz do projeto
-FRONTEND_DIR = Path(__file__).resolve().parents[2] / "frontend"
+# Frontend empacotado ou no repositório (ver nlq/paths.py).
+FRONTEND_DIR = frontend_dir()
 
-load_dotenv()
+load_env()
 
 app = FastAPI()
 

@@ -4,22 +4,19 @@ from langgraph.checkpoint.memory import InMemorySaver
 
 import os
 import requests
-from pathlib import Path
-from dotenv import load_dotenv
 
+from nlq.paths import load_env, prompts_dir, skills_dir
 from nlq.tools.extract import create_json
 from nlq.tools.dev_master import goat
 from nlq.tools.listar_planilhas import lista_arquivos
 from nlq.tools.schema_info import consultar_schema
 from nlq.tools.retrieval import buscar_semantico
 
-load_dotenv()
-
-BASE_DIR = Path(__file__).resolve().parent
+load_env()
 
 
-def load_prompt(path: str) -> str:
-    return (BASE_DIR / path).read_text(encoding="utf-8")
+def load_prompt(name: str) -> str:
+    return (prompts_dir() / name).read_text(encoding="utf-8")
 
 
 def check_openrouter_key() -> bool:
@@ -90,12 +87,12 @@ def create_nlq_agent():
         tools=tools,
         checkpointer=checkpointer,
         system_prompt=(
-            load_prompt("prompts/system_base.md")
+            load_prompt("system_base.md")
             + "\n\n"
-            + load_prompt("prompts/specific_role.md")
+            + load_prompt("specific_role.md")
         ),
         skills=[
-            "./skills/",
+            str(skills_dir()),
         ],
     )
 

@@ -5,12 +5,11 @@ from langchain_core.tools import tool
 from openpyxl.utils import get_column_letter
 
 from nlq.data import get_schema
-
-BASE_DIR = Path(__file__).resolve().parent
+from nlq.paths import data_dir
 
 
 def _resolve_path(name: str, ext: str) -> Path:
-    sheets_dir = (BASE_DIR / "../../../sheets").resolve()
+    sheets_dir = data_dir().resolve()
     path = (sheets_dir / ext / f"{name}.{ext}").resolve()
 
     # O nome vem da LLM: não permite sair da pasta de planilhas.
