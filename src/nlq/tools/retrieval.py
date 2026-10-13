@@ -3,13 +3,11 @@ from pathlib import Path
 from langchain_core.tools import tool
 
 from nlq.data.semantic_search import search_documents
-
-
-BASE_DIR = Path(__file__).resolve().parent
+from nlq.paths import data_dir
 
 
 def _resolve_path(name: str, ext: str) -> Path:
-    sheets_dir = (BASE_DIR / "../../../sheets").resolve()
+    sheets_dir = data_dir().resolve()
     path = (sheets_dir / ext / f"{name}.{ext}").resolve()
 
     if not path.is_relative_to(sheets_dir):

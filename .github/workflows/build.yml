@@ -1,0 +1,108 @@
+name: build
+
+on:
+  push:
+    branches: [main, develop]
+    tags: ["v*"]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    env:
+      API_SELECT: groq
+      GROQ_API_KEY: test
+      OPENROUTER_API_KEY: test
+      OPENAI_API_KEY: test
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Instalar uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Instalar dependências
+        run: uv sync --frozen
+
+      - name: Testes
+        run: uv run python -m unittest discover -s tests -v
+
+  build:
+    name: build (${{ matrix.artifact }})
+    needs: test
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact: NLQ-linux-x86_64
+          - os: windows-latest
+            artifact: NLQ-windows-x86_64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Instalar uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Instalar dependências
+        run: uv sync --frozen
+
+      - name: Empacotar com PyInstaller
+        run: uv run --with pyinstaller pyinstaller --noconfirm --clean nlq.spec
+
+      - name: Adicionar .env de exemplo e planilhas
+        shell: bash
+        run: |
+          cp .env.example dist/NLQ/.env.example
+          cp -r sheets dist/NLQ/sheets
+
+      - name: Compactar (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: cd dist && zip -r "${{ matrix.artifact }}.zip" NLQ
+
+      - name: Compactar (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Compress-Archive -Path dist/NLQ -DestinationPath "dist/${{ matrix.artifact }}.zip"
+
+      - name: Publicar artefato
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/${{ matrix.artifact }}.zip
+          if-no-files-found: error
+
+  release:
+    name: release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Baixar artefatos
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Criar release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.zip

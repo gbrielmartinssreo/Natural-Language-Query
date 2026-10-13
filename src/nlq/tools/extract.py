@@ -5,11 +5,9 @@ from langchain_core.tools import tool
 
 from nlq.data.loader import load_records, read_csv, read_workbook
 from nlq.data.schema import build_schema, make_headers as _make_headers
+from nlq.paths import data_dir
 
 __all__ = ["create_json", "read_csv", "read_excel"]
-
-
-BASE_DIR = Path(__file__).resolve().parent
 
 
 def read_excel(path: Path) -> dict[str, list[dict]]:
@@ -32,7 +30,7 @@ def create_json(name: str, ext: str) -> str:
     if ext not in ("csv", "xlsx"):
         raise ValueError("Extensão não suportada")
 
-    path = (BASE_DIR / "../../../sheets" / ext / f"{name}.{ext}").resolve()
+    path = (data_dir() / ext / f"{name}.{ext}").resolve()
 
     if not path.is_file():
         raise FileNotFoundError(f"Arquivo não encontrado: {path}")

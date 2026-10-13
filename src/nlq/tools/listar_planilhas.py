@@ -1,13 +1,12 @@
 from langchain_core.tools import tool
 
-from pathlib import Path
 import re
 
-BASE_DIR = Path(__file__).resolve().parent
+from nlq.paths import data_dir
 
 
 def listar_csvs() -> list[str]:
-    docs_dir = (BASE_DIR / "../../../sheets/csv").resolve()
+    docs_dir = (data_dir() / "csv").resolve()
 
     archives = []
 
@@ -20,7 +19,7 @@ def listar_csvs() -> list[str]:
 
 
 def listar_xlsx() -> list[str]:
-    docs_dir = (BASE_DIR / "../../../sheets/xlsx").resolve()
+    docs_dir = (data_dir() / "xlsx").resolve()
 
     archives = []
 

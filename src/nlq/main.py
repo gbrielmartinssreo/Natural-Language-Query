@@ -1,5 +1,5 @@
 from nlq.agent.agent import create_nlq_agent
-from dotenv import load_dotenv
+from nlq.paths import load_env
 
 import time
 
@@ -13,7 +13,7 @@ from rich.rule import Rule
 
 
 def main():
-    load_dotenv()
+    load_env()
 
     agent, checkpointer = create_nlq_agent()
     console = Console()

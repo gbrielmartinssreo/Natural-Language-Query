@@ -2,10 +2,11 @@
 
 from collections.abc import Sequence
 
-from dotenv import load_dotenv
 from openai import OpenAI
 
-load_dotenv()
+from nlq.paths import load_env
+
+load_env()
 
 MODEL = "text-embedding-3-small"
 BATCH_SIZE = 64
