@@ -1,6 +1,6 @@
 ---
 name: read-file
-description: Use para consultar, ler, resumir ou analisar arquivos. Localize o arquivo com lista_arquivos. Para perguntas sobre conteúdo, incluindo temas gerais, resumos de abas e eixos, use buscar_semantico primeiro. Use consultar_schema para estrutura. Reserve create_json para extração completa explicitamente solicitada ou necessária à tarefa. Peça confirmação se houver ambiguidade.
+description: Use para consultar, ler, resumir ou analisar arquivos. Localize o arquivo com lista_arquivos. Escolha a ferramenta pela natureza da pergunta — consultar_dados para critérios verificáveis nas colunas (filtros, contagens, agregações), buscar_semantico para significado e paráfrases, e consultar_schema para estrutura. Reserve create_json para extração completa explicitamente solicitada ou necessária à tarefa. Peça confirmação se houver ambiguidade.
 ---
 
 # Leitura e análise de arquivos
@@ -12,22 +12,24 @@ description: Use para consultar, ler, resumir ou analisar arquivos. Localize o a
 3. Se houver múltiplas correspondências plausíveis, peça confirmação.
 4. Com o arquivo identificado, escolha a consulta pelas regras abaixo.
 
-## Regra principal: conteúdo começa pelo RAG
+## Regra principal: escolha pela natureza da pergunta
 
-Para perguntas sobre o conteúdo, use buscar_semantico como primeira
-consulta, inclusive quando o usuário pedir uma explicação geral,
-um resumo ou uma visão geral de uma aba, eixo ou tema.
+Escolha a ferramenta antes de consultar:
+
+- Use consultar_dados quando os critérios puderem ser verificados
+  diretamente nos valores das colunas (nomes, órgãos, atores,
+  categorias, filtros, contagens e agregações).
+- Use buscar_semantico apenas quando a pergunta depender de
+  significado, sinônimos ou interpretação conceitual de um tema.
 
 Exemplos:
-- "O eixo 1 aborda o quê no geral?"
-- "Sobre o que é essa planilha?"
-- "Resuma as propostas do eixo 2."
-- "Quais iniciativas tratam de educação?"
-- "O que o arquivo diz sobre saúde?"
+- "Quais medidas dependem de X e Y?" -> consultar_dados.
+- "Quantas propostas há no eixo 2?" -> consultar_dados.
+- "O que o arquivo diz sobre saúde, mesmo com outras palavras?" -> buscar_semantico.
 
 Esses pedidos NÃO autorizam extração completa por padrão.
 
-Não chame consultar_schema antes do RAG por rotina.
+Não chame consultar_schema por rotina.
 Não chame create_json apenas para confirmar informações já
 sustentadas pelos resultados recuperados.
 

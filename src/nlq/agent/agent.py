@@ -12,6 +12,7 @@ from nlq.tools.dev_master import goat
 from nlq.tools.listar_planilhas import lista_arquivos
 from nlq.tools.schema_info import consultar_schema
 from nlq.tools.retrieval import buscar_semantico
+from nlq.tools.consultar_dados import consultar_dados
 
 
 load_env()
@@ -45,53 +46,138 @@ def check_openrouter_key() -> bool:
 REGRAS_DE_CONSULTA = """
 Escolha das ferramentas para consultar arquivos:
 
-1. Use lista_arquivos para localizar o arquivo solicitado.
-   Se houver ambiguidade, peça esclarecimento.
+1. IDENTIFICAÇÃO DO ARQUIVO
+   - Use lista_arquivos para descobrir arquivos disponíveis.
+   - Se o arquivo já estiver identificado na conversa, reutilize-o.
+   - Se houver ambiguidade real, solicite esclarecimento.
+   - Não repita a descoberta sem necessidade.
 
-2. Para perguntas sobre conteúdo, priorize buscar_semantico.
-   Isso inclui perguntas específicas, resumos e visões gerais
-   de uma planilha, aba, eixo ou tema.
+2. ESCOLHA DA ESTRATÉGIA
+   Identifique a natureza da pergunta antes de selecionar ferramentas.
 
-   Exemplos:
-   - "O eixo 1 aborda o quê no geral?"
-   - "Sobre o que é essa planilha?"
-   - "Quais medidas tratam de educação?"
+   Use consultar_dados quando a consulta puder ser resolvida
+   por operações determinísticas sobre colunas e registros:
+   - filtros e condições;
+   - contagens e percentuais;
+   - somas, médias, mínimos e máximos;
+   - comparações e rankings;
+   - agrupamentos e valores distintos;
+   - identificação de registros com múltiplos critérios.
 
-   Nesses casos, consulte buscar_semantico antes de considerar
-   create_json. Não extraia a planilha inteira por padrão.
+   Use buscar_semantico quando a consulta exigir:
+   - interpretação de significado;
+   - relações conceituais;
+   - identificação de sinônimos;
+   - recuperação de registros por similaridade;
+   - perguntas abertas que não possam ser resolvidas
+     por correspondência direta dos dados.
 
-3. Use consultar_schema para perguntas sobre estrutura:
-   nomes de abas, colunas, cabeçalhos e regiões tabulares.
-   Não consulte o schema antes do RAG por rotina.
+   Não utilize RAG como etapa obrigatória antes do Pandas.
+   Não utilize ambas as ferramentas por rotina.
 
-4. Use create_json quando:
-   - o usuário solicitar explicitamente o conteúdo completo;
-   - a tarefa exigir todos os registros e não houver uma
-     ferramenta de consulta estruturada adequada;
-   - a busca semântica for insuficiente e houver necessidade
-     concreta de uma extração ampla.
+3. CONSULTAS ESTRUTURADAS
+   - Prefira consultar_dados para condições verificáveis
+     diretamente nos valores das colunas.
+   - Combine múltiplos filtros na mesma chamada quando
+     a pergunta exigir condições simultâneas (AND).
+   - Consulte apenas as colunas necessárias.
+   - Se a consulta envolver todas as abas, não execute
+     uma chamada para cada aba sem necessidade.
+   - Use aba="" para consultar todas as abas quando
+     a estrutura permitir.
+   - Respeite os limites e indicadores de truncamento.
 
-5. Contagens, somas, médias e comparações completas exigem
-   dados completos do escopo necessário. Não use apenas os
-   resultados do RAG para calcular totais.
+4. CONSULTAS SEMÂNTICAS
+   - Utilize buscar_semantico somente quando houver
+     necessidade real de recuperação por significado.
+   - Comece com poucos candidatos e amplie quando necessário.
+   - Similaridade não representa certeza ou relevância
+     garantida.
+   - Resultados top_k não representam cobertura exaustiva.
+   - Não calcule totais completos com base apenas
+     nos candidatos recuperados.
 
-6. Confira a aba de origem dos resultados.
-   Mencionar um eixo na query não garante filtro por esse eixo.
-   Não apresente resultados de outra aba como se fossem da
-   aba solicitada.
+5. CONSULTAS HÍBRIDAS
+   - Combine RAG e Pandas somente quando a pergunta
+     exigir simultaneamente interpretação semântica
+     e operações estruturadas.
+   - Use o RAG para identificar candidatos.
+   - Utilize as referências desses candidatos em
+     consultar_dados para executar operações exatas.
+   - Resultados calculados sobre refs representam
+     somente os registros recuperados.
+   - Não apresente agregações semânticas parciais
+     como totais exaustivos.
+   - Quando a cobertura completa não puder ser
+     garantida, informe essa limitação.
 
-7. Resultados semânticos não garantem cobertura completa.
-   Para uma visão parcial, diga "Nos registros consultados...".
-   Se faltar evidência, refine a busca ou informe a limitação.
+6. CONSULTA DE ESTRUTURA
+   - Use consultar_schema para identificar abas,
+     colunas, cabeçalhos e regiões tabulares.
+   - Consulte o schema quando houver dúvida real
+     sobre a estrutura necessária à operação.
+   - Não consulte o schema por rotina antes de
+     buscar_semantico ou consultar_dados.
+   - Reutilize informações estruturais já conhecidas.
 
-8. Responda de forma proporcional à pergunta.
-   Para uma pergunta geral simples, prefira um parágrafo curto.
-   Cite as fontes disponíveis sem inventar referências.
+7. EXTRAÇÃO COMPLETA
+   Use create_json somente quando:
+   - o usuário solicitar explicitamente os dados completos;
+   - a tarefa exigir registros que não possam ser obtidos
+     pelas ferramentas de consulta disponíveis;
+   - houver necessidade justificada de extração ampla.
 
-Estas regras substituem eventuais instruções genéricas de
-sempre usar create_json para ler ou analisar arquivos.
+   Não use create_json como substituto de consultar_dados.
+   Evite enviar grandes volumes de dados ao modelo.
+
+8. EFICIÊNCIA DAS CHAMADAS
+   - Planeje a consulta antes de executar ferramentas.
+   - Prefira uma consulta suficiente a várias consultas
+     fragmentadas que produzam o mesmo resultado.
+   - Não repita chamadas com os mesmos argumentos
+     quando já houver resultados suficientes.
+   - Não execute ferramentas adicionais apenas para
+     confirmar resultados determinísticos válidos,
+     salvo quando existir inconsistência concreta.
+   - Se a resposta já estiver fundamentada, finalize-a.
+
+9. INTEGRIDADE E CONSOLIDAÇÃO
+   - Diferencie registros, medidas e valores distintos.
+   - Não confunda quantidade de linhas com quantidade
+     de entidades únicas.
+   - Quando solicitado, consolide registros repetidos
+     pela chave lógica adequada à pergunta.
+   - Preserve diferenças relevantes entre registros.
+   - Não elimine informações distintas apenas porque
+     dois registros possuem o mesmo nome.
+   - Não inclua registros que deixem de satisfazer
+     qualquer condição obrigatória da pergunta.
+   - Nunca invente resultados ou complete dados ausentes.
+
+10. RASTREABILIDADE
+   - Preserve nomes e valores originais das fontes.
+   - Confira as abas e referências dos registros.
+   - Não atribua registros a abas diferentes da origem.
+   - Não confunda índice lógico com linha física do Excel.
+   - Não afirme que um valor está transcrito integralmente
+     quando houver truncamento.
+   - Se o resultado for parcial, informe a limitação.
+
+11. CONSTRUÇÃO DA RESPOSTA
+   - Responda diretamente ao que foi perguntado.
+   - Evite repetir informações idênticas.
+   - Organize resultados extensos de maneira legível.
+   - Apresente todas as correspondências necessárias
+     quando a pergunta exigir uma consulta completa.
+   - Não omita resultados válidos silenciosamente.
+   - Não transforme uma consulta simples em uma
+     análise extensa sem necessidade.
+   - Cite as fontes disponíveis sem inventar referências.
+
+Estas regras prevalecem sobre instruções genéricas
+que determinem o uso obrigatório de RAG, schema
+ou extração completa antes de qualquer consulta.
 """
-
 
 def create_nlq_agent():
     checkpointer = InMemorySaver()
@@ -113,13 +199,13 @@ def create_nlq_agent():
 
     else:
         model = init_chat_model(
-            "openrouter:qwen/qwen3-30b-a3b-instruct-2507",
+            "openrouter:deepseek/deepseek-v4-flash-0731",
             temperature=0.1,
             timeout=60000,
             max_tokens=10000,
         )
         print(
-            "[MODELO] OpenRouter: qwen/qwen3-30b-a3b-instruct-2507",
+            "[MODELO] OpenRouter: deepseek/deepseek-v4-flash-latest-0731",
             flush=True,
         )
 
@@ -153,6 +239,7 @@ def create_nlq_agent():
         lista_arquivos,
         consultar_schema,
         buscar_semantico,
+        consultar_dados,
     ]
 
     system_prompt = "\n\n".join(

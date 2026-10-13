@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 from langchain_core.tools import tool
@@ -32,17 +33,18 @@ def buscar_semantico(
     """
     Busca registros semanticamente relacionados a uma pergunta.
 
-    Prefira esta ferramenta para perguntas sobre assuntos, iniciativas,
-    medidas, problemas, objetivos ou metas específicos presentes no arquivo.
+    Use quando a identificação depender de significado, sinônimos ou
+    interpretação conceitual, mesmo quando as palavras da pergunta forem
+    diferentes das presentes na planilha. Não use quando os critérios
+    puderem ser verificados diretamente nos valores das colunas: nesse
+    caso, prefira consultar_dados.
+
     Evite extrair a planilha inteira para responder uma busca pontual.
     Não garante cobertura completa nem um resumo representativo do arquivo.
 
-    Use para encontrar indicadores, medidas, problemas e metas
-    relacionados ao significado da pergunta, mesmo quando as palavras
-    utilizadas forem diferentes das presentes na planilha.
-
-    Não use esta ferramenta para contagens, somas ou cálculos exatos.
-    Para essas operações, consulte os dados estruturados.
+    Não use esta ferramenta para contagens, somas, cálculos exatos nem
+    para filtros textuais por correspondência direta dos valores. Para
+    essas operações, use consultar_dados.
 
     Args:
         name: Nome do arquivo sem extensão, por exemplo matriz.
@@ -78,8 +80,13 @@ def buscar_semantico(
             sheet = document.metadata.get("sheet")
             location = f" | Aba: {sheet}" if sheet else ""
 
+            registro = document.metadata.get("record_index")
+            ref = {"aba": sheet or "", "indice": registro}
             lines.append(
-                f"Resultado {index} | Similaridade: {score:.4f}{location}\n"
+                f"Resultado {index} | Similaridade: {score:.4f}{location}"
+                f" | Registro: {registro}\n"
+                f"Ref para consultar_dados: "
+                f"{json.dumps(ref, ensure_ascii=False, separators=(',', ':'))}\n"
                 f"{document.page_content}"
             )
 
