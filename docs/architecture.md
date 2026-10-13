@@ -3,16 +3,17 @@
 ## 1. Visão geral
 
 O NLQ responde **perguntas em linguagem natural** sobre dados de planilhas
-(CSV e XLSX). O caminho é direto: o agente conversa com o LLM, o LLM decide o que
-consultar, uma **ferramenta de planilha** devolve os dados em **JSON**, e o LLM
-interpreta, calcula e redige a resposta final.
+(CSV e XLSX). O agente (`deepagents`) decide a estratégia: prioriza **busca semântica** (RAG)
+para perguntas de conteúdo; usa `consultar_schema` para estrutura; e recorre a `create_json`
+apenas quando estritamente necessário. Os dados são lidos via parser + schema (`xldetect`)
+e, quando enviado ao LLM, passa por guardas (bloqueio por tamanho em `create_json`).
 
-O agente também mantém **memória da sessão**: o histórico de turnos é gravado por
+O agente mantém **memória da sessão**: o histórico de turnos é gravado por
 um checkpointer do LangGraph e devolvido ao LLM a cada pergunta.
 
 O mesmo agente é exposto por **duas interfaces**: a CLI (`src/nlq/main.py`) e uma
-**API FastAPI** (`src/nlq/api.py`). As duas compartilham a sessão em memória —
-mesmo `thread_id`, mesmo checkpointer.
+**API FastAPI** (`src/nlq/api.py`) com **streaming NDJSON**. Ambas compartilham a sessão em memória —
+mesmo checkpointer; a API aceita `thread_id` por requisição.
 
 ```mermaid
 ---
@@ -56,17 +57,19 @@ semi-estruturadas ou corporativas exigem interpretação que ainda não existe
 | Componente            | Onde                                | Papel                                                            | Estado       |
 |-----------------------|-------------------------------------|------------------------------------------------------------------|--------------|
 | Interface (CLI)       | `src/nlq/main.py`                   | Recebe a pergunta e imprime a resposta (`rich`)                  | **Atual**    |
-| API (FastAPI)         | `src/nlq/api.py`                    | Expõe o agente por HTTP: `POST /api/chat`, `DELETE /api/limpar-conversa`, `GET /health` | **Atual**    |
-| Agente (LangChain)    | `src/nlq/agent/agent.py`            | Orquestra o ciclo LLM ↔ ferramenta                               | **Atual**    |
-| LLM (Groq/OpenRouter) | `src/nlq/agent/agent.py`            | Decide o que consultar, interpreta os dados e redige a resposta   | **Atual**    |
-| Prompt de sistema     | `src/nlq/agent/prompts/`            | Dois arquivos Markdown concatenados em `system_prompt`           | **Atual**    |
-| Tool de planilha      | `src/nlq/tools/extract.py`          | Tool `create_json` registrada no agente; expõe os dados da planilha | **Atual** |
-| Tool de descoberta    | `src/nlq/tools/listar_planilhas.py` | Tool `lista_arquivos`; informa quais planilhas existem           | **Atual**    |
-| Parser (CSV)          | `src/nlq/tools/extract.py`          | Lê o CSV com `csv.DictReader` e fallback de codificação   | **Atual**    |
-| Parser (XLSX)         | `src/nlq/tools/extract.py`          | Lê todas as abas com `openpyxl` e devolve um dict por aba        | **Atual**    |
-| Memória de sessão     | `src/nlq/agent/agent.py`            | `InMemorySaver` do LangGraph; acumula os turnos da execução      | **Atual**    |
-| Resposta final        | `src/nlq/main.py` e `src/nlq/api.py` | Texto devolvido à CLI (Painel `rich`) ou à requisição (JSON)     | **Atual**    |
-| Interface (Web)       | `frontend/`                          | Frontend de chat estático (HTML/CSS/JS puro) servido pela API: balões de mensagem, markdown, loading, indicador de planilha, tema claro/escuro e erros visuais | **Em andamento** ([#19](https://github.com/gbrielmartinssreo/Natural-Language-Query/issues/19)) |
+| API (FastAPI)         | `src/nlq/api.py`                    | Expõe agente via streaming NDJSON: `POST /api/chat`, `DELETE /api/limpar-conversa`, `GET /health`. Fila + keep-alive + cancelamento cooperativo | **Atual**    |
+| Agente (deepagents)   | `src/nlq/agent/agent.py`            | Orquestra o ciclo LLM ↔ ferramentas; usa `FilesystemBackend` para skills e `REGRAS_DE_CONSULTA` | **Atual**    |
+| LLM (Groq/OpenRouter) | `src/nlq/agent/agent.py`            | Decide estratégia (RAG-first), interpreta e redige resposta      | **Atual**    |
+| Prompt de sistema     | `src/nlq/agent/prompts/`            | `system_base.md` + `specific_role.md` + `REGRAS_DE_CONSULTA`     | **Atual**    |
+| Tools                 | `src/nlq/tools/`                    | `create_json`, `lista_arquivos`, `consultar_schema`, `buscar_semantico`, `goat` | **Atual**    |
+| Schema (xldetect)     | `src/nlq/data/schema.py`            | Detecta regiões tabulares, cabeçalhos, normaliza schema         | **Atual**    |
+| Loader + Cache        | `src/nlq/data/loader.py`            | Carrega CSV/XLSX com cache de schema e registros (invalida por mtime/tamanho) | **Atual**    |
+| Embeddings/RAG        | `src/nlq/data/embeddings.py`, `semantic_search.py`, `documents.py` | Gera embeddings (OpenAI), indexa por fingerprint e busca semântica | **Atual**    |
+| Parser (CSV)          | `src/nlq/data/loader.py`            | `csv.DictReader` com fallback de codificação                     | **Atual**    |
+| Parser (XLSX)         | `src/nlq/data/loader.py`            | Lê via `openpyxl` guiado por schema (regiões), trata mesclagens verticais | **Atual**    |
+| Memória de sessão     | `src/nlq/agent/agent.py`            | `InMemorySaver` (LangGraph), compartilhada CLI/API               | **Atual**    |
+| Resposta final        | `src/nlq/main.py` e `src/nlq/api.py` | CLI (Painel `rich`) ou streaming NDJSON (`result`)               | **Atual**    |
+| Interface (Web)       | `frontend/`                          | Frontend estático com consumo de stream NDJSON, cancelamento, keep-alive, tema | **Em andamento** ([#19](https://github.com/gbrielmartinssreo/Natural-Language-Query/issues/19)) |
 | Ambientes e deploy    | —                                   | `develop` (teste) e `main` (produção), com URL fixa cada          | **Planejado** ([#16](https://github.com/gbrielmartinssreo/Natural-Language-Query/issues/16)–[#18](https://github.com/gbrielmartinssreo/Natural-Language-Query/issues/18)) |
 
 A interface web já existe: o backend HTTP (`src/nlq/api.py`) serve a API e o
@@ -99,30 +102,24 @@ faz a interpretação e o cálculo sobre o JSON. O histórico é gerenciado pelo
 checkpointer, não por código de conversação na CLI nem na API.
 
 
-### Fluxo alvo para escala
+### Fluxo atual e alvo
 
-O fluxo atual é mantido por simplicidade, mas o alvo é evitar que toda pergunta
-reenvie a planilha inteira ao modelo:
+O fluxo atual prioriza **seleção local antes do LLM**: `buscar_semantico` retorna candidatos relevantes (RAG), `consultar_schema` evita ler registros, e `create_json` só é chamado quando necessário — com **bloqueio por tamanho** (acima de 20.000 caracteres) que impede envio da planilha inteira caso extrapole o limite.
 
 ```text
-Planilha
+Pergunta
+   ↓ (RAG-first)
+buscar_semantico (contexto reduzido)
    ↓
-parser / normalização
-   ↓
-representação local
-   ↓
-┌──────────────────────┬──────────────────────┐
-│ executor tabular     │ busca semântica      │
-│ filtros/agregações   │ registros candidatos │
-└──────────────────────┴──────────────────────┘
-             ↓
-       contexto reduzido
-             ↓
-            LLM
+  LLM decide: precisa mais dados?
+   ├─ consultar_schema (metadados)
+   ├─ create_json (somente se estritamente necessário e dentro do limite)
+   └─ responder com evidências
+            ↓
+           LLM
 ```
 
-Cachear o arquivo pode reduzir custo de I/O, mas o ganho principal esperado vem
-da **seleção local antes do LLM**.
+Evolução futura mantém esse princípio, adicionando executor tabular (Pandas) para filtros/agregações determinísticas.
 
 ## 4. Princípios de projeto
 
@@ -144,12 +141,10 @@ núcleo dependa do seu conteúdo.
 ### Payload e contexto
 
 - **`json.dumps` com `indent=2`** — a indentação aumenta o payload enviado ao LLM;
-  em XLSX multi-aba o JSON completo pode se aproximar do `max_tokens` (7000 Groq /
-  10000 OpenRouter).
+  em XLSX multi-aba o JSON completo pode se aproximar do `max_tokens`. **Mitigação:** `create_json` bloqueia extração acima de 20.000 caracteres e orienta uso de `buscar_semantico`.
 - **Ausência de dado não sinalizada** — a tool devolve o dict cru, sem marcar
   `n/a` ou célula vazia.
-- **Falha de leitura sem tratamento** — `FileNotFoundError` e erros de parsing sobem
-  direto para o LLM.
+- **Falhas de leitura** — erros sobem para o LLM (padrão atual). `create_json` valida extensão e existência do arquivo; `buscar_semantico` também valida entrada.
 
 ### Parser XLSX
 
@@ -172,23 +167,17 @@ núcleo dependa do seu conteúdo.
 
 ### Acesso a disco
 
-- **Path sem validação** — `name` e `ext` não são sanitizados, então um `name`
-  como `../../.env` escapa de `sheets/`.
-- **`ext` acoplado ao layout** — a extensão também nomeia a pasta em `sheets/`.
-- **`lista_arquivos` sem guardas** — `listar_csvs` e `listar_xlsx` são
-  implementações duplicadas, sem tratamento para pasta ausente e sem filtro por
-  extensão (`iterdir()` devolve qualquer arquivo).
+- **Path com validação** — `buscar_semantico` e `consultar_schema` usam `_resolve_path` com `path.is_relative_to(sheets_dir)`. `create_json` resolve sob `data_dir()/ext/` e verifica `is_file()`. Ainda vale reforçar sanitização em casos futuros.
+- **`ext` acoplado ao layout** — a extensão também nomeia a pasta em `sheets/` (diretório por extensão).
+- **`lista_arquivos`** — lê `sheets/csv/` e `sheets/xlsx/`; remove trechos entre parênteses. Pode ser aprimorado (filtro por extensão, tratamento de pasta ausente).
 
 ### Agente e configuração
 
-- **As duas chaves de API são obrigatórias** — os dois modelos são construídos
-  antes da escolha, logo falta de `GROQ_API_KEY` derruba a inicialização mesmo
-  usando OpenRouter.
-- **`model` pode ficar sem atribuição** — `API_SELECT` inesperado com chave do
-  OpenRouter válida resulta em `UnboundLocalError`.
-- **`requests` usado sem estar declarado** em `pyproject.toml`.
-- **`check_openrouter_key()` faz chamada de rede** a cada criação do agente,
-  inclusive quando a autodetecção já é redundante.
+- **Chaves** — `GROQ_API_KEY` é usada para construir/inicializar modelo Groq quando selecionado; OpenRouter validado via `check_openrouter_key()`. Embeddings exigem `OPENAI_API_KEY`.
+- **Seleção de modelo** — simplificada via `usar_groq` (compara `API_SELECT` e validação da chave OpenRouter). Logs `[MODELO]` na inicialização.
+- **`requests`** — declarado implicitamente via dependências (usado em `agent.py`).
+- **`check_openrouter_key()`** — chamada única para decidir provider (autodetecção).
+- **Skills** — validadas na inicialização (RuntimeError se nenhuma SKILL.md encontrada). Carregadas via `FilesystemBackend` do deepagents.
 - Sem testes automatizados.
 
 ## 6. Direção de evolução
