@@ -70,5 +70,11 @@ ferramenta informa isso explicitamente e não lista colunas.
 - Não invente colunas, abas ou valores que não apareçam na resposta.
 - A resposta não contém registros. Nunca responda sobre conteúdo de células
   com base nela.
-- Se a pergunta exigir valores, diga que vai consultar os dados e use
+- Se a pergunta exigir valores, selecione buscar_semantico para assuntos específicos ou consulta estruturada para resultados exatos.
 - Não use o schema sozinho para responder perguntas sobre valores das células.
+
+## Escolha e resposta
+
+Perguntas sobre assuntos, medidas, iniciativas e metas específicas devem começar por buscar_semantico, sem consulta estrutural obrigatória.
+Para “sobre o que é a planilha?”, não confunda descrição da estrutura com compreensão do conteúdo. O schema sozinho não sustenta afirmações sobre valores.
+Responda somente com os detalhes estruturais pedidos. Não liste todos os intervalos e cabeçalhos se o usuário só pediu uma visão breve.

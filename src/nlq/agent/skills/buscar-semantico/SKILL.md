@@ -51,3 +51,13 @@ Comece com poucos resultados e aumente `top_k` quando precisar de maior cobertur
 ## Regra importante
 
 A busca semântica encontra registros relevantes, mas não garante que todos os registros relevantes tenham sido recuperados.
+
+## Prioridade e economia de chamadas
+
+Para consultas por assunto, use esta ferramenta antes de considerar create_json.
+Se os resultados sustentarem a resposta, responda sem extrair todos os dados.
+Não execute consultar_schema antes desta ferramenta por rotina.
+Use top_k=5 inicialmente. Aumente ou refine somente se faltar evidência relevante.
+Não use os cinco resultados como resumo garantido de toda a planilha.
+Para perguntas gerais, dê uma resposta curta e informe quando a visão for parcial.
+Não exponha ferramentas ou detalhes internos ao usuário, salvo pedido técnico.
