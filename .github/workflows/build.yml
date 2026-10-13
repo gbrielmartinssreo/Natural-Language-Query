@@ -2,14 +2,22 @@ name: build
 
 on:
   push:
-    branches: [main, develop]
-    tags: ["v*"]
+    branches:
+      - main
+      - develop
+      - 'feature/**'
+    tags:
+      - 'v*'
+
   pull_request:
-    branches: [main, develop]
+    branches:
+      - main
+      - develop
+
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: build-${{ github.ref }}
@@ -17,13 +25,15 @@ concurrency:
 
 jobs:
   test:
-    name: test
+    name: Testes
     runs-on: ubuntu-latest
+
     env:
       API_SELECT: groq
       GROQ_API_KEY: test
       OPENROUTER_API_KEY: test
       OPENAI_API_KEY: test
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -36,19 +46,21 @@ jobs:
       - name: Instalar dependências
         run: uv sync --frozen
 
-      - name: Testes
+      - name: Executar testes
         run: uv run python -m unittest discover -s tests -v
 
   build:
-    name: build (${{ matrix.artifact }})
+    name: Build (${{ matrix.artifact }})
     needs: test
     runs-on: ${{ matrix.os }}
+
     strategy:
       fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
             artifact: NLQ-linux-x86_64
+
           - os: windows-latest
             artifact: NLQ-windows-x86_64
 
@@ -67,7 +79,7 @@ jobs:
       - name: Empacotar com PyInstaller
         run: uv run --with pyinstaller pyinstaller --noconfirm --clean nlq.spec
 
-      - name: Adicionar .env de exemplo e planilhas
+      - name: Adicionar configuração e planilhas de exemplo
         shell: bash
         run: |
           cp .env.example dist/NLQ/.env.example
@@ -76,12 +88,18 @@ jobs:
       - name: Compactar (Linux)
         if: runner.os == 'Linux'
         shell: bash
-        run: cd dist && zip -r "${{ matrix.artifact }}.zip" NLQ
+        run: |
+          cd dist
+          zip -r "${{ matrix.artifact }}.zip" NLQ
 
       - name: Compactar (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: Compress-Archive -Path dist/NLQ -DestinationPath "dist/${{ matrix.artifact }}.zip"
+        run: |
+          Compress-Archive `
+            -Path dist/NLQ `
+            -DestinationPath "dist/${{ matrix.artifact }}.zip" `
+            -Force
 
       - name: Publicar artefato
         uses: actions/upload-artifact@v4
@@ -89,12 +107,17 @@ jobs:
           name: ${{ matrix.artifact }}
           path: dist/${{ matrix.artifact }}.zip
           if-no-files-found: error
+          retention-days: 14
 
   release:
-    name: release
+    name: Publicar release
     needs: build
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
     steps:
       - name: Baixar artefatos
         uses: actions/download-artifact@v4
@@ -102,7 +125,8 @@ jobs:
           path: dist
           merge-multiple: true
 
-      - name: Criar release
+      - name: Criar GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: dist/*.zip
+          generate_release_notes: true
