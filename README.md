@@ -117,11 +117,15 @@ deploy ainda é **decisão pendente**.
 
 ## Configuração
 
-Crie um `.env` na raiz do projeto:
+Há um modelo com todas as variáveis em [`.env.example`](.env.example). Em
+desenvolvimento, crie um `.env` na raiz do projeto; no executável empacotado, o
+`.env` fica **ao lado do executável** (ver
+[Executável desktop](#executável-desktop-pyinstaller)):
 
 ```env
 OPENROUTER_API_KEY=sua-chave-aqui
 GROQ_API_KEY=sua-chave-aqui
+OPENAI_API_KEY=sua-chave-aqui   # usada pela busca semântica (embeddings)
 ```
 
 A chave do OpenRouter é validada no startup: se a chamada falhar, o agente usa o
@@ -138,9 +142,11 @@ API_SELECT=openrouter   # ou groq
 | ausente        | Groq se a chave do OpenRouter for inválida; OpenRouter caso contrário |
 | qualquer outro | `UnboundLocalError` — ver [bug conhecido](docs/agent.md#seleção-de-modelo) |
 
-Os dois modelos usam `temperature=0.1`, `timeout=60000` (ms) e
-`max_tokens` de **7000** (Groq) ou **10000** (OpenRouter) — limite relevante
-porque a tool de planilha envia a planilha inteira no contexto.
+Os dois modelos usam `temperature=0.1` e `max_tokens` de **7000** (Groq) ou
+**10000** (OpenRouter) — limite relevante porque a tool de planilha envia a
+planilha inteira no contexto. O `timeout` fica em ~60 s por chamada ao modelo,
+com unidades distintas por integração: **60 s** no Groq e **60000 ms** no
+OpenRouter.
 
 
 ## Uso
@@ -198,15 +204,61 @@ A API usa o **mesmo** `thread_id="default"` da CLI: todas as requisições
 compartilham uma única sessão, e `DELETE /api/limpar-conversa` é o único caminho
 para limpá-la.
 
+## Executável desktop (PyInstaller)
+
+Além de rodar em desenvolvimento, o NLQ pode ser distribuído como um
+**executável local em pasta** (sem instalação). O código e os recursos internos
+(**frontend, prompts e skills**) vão dentro do pacote; **`.env` e `sheets/`
+ficam fora**, ao lado do executável, para serem editados sem reconstruir a
+aplicação. Os caminhos são resolvidos por [`src/nlq/paths.py`](src/nlq/paths.py):
+
+| Recurso | Desenvolvimento | Empacotado |
+|---------|-----------------|------------|
+| frontend / prompts / skills | repositório | `_internal/` do pacote |
+| `sheets/` | raiz do repositório | ao lado do executável |
+| `.env` | raiz do repositório | ao lado do executável |
+
+Para gerar o pacote:
+
+```bash
+uv run --with pyinstaller pyinstaller --noconfirm --clean nlq.spec
+```
+
+O resultado fica em `dist/NLQ/`:
+
+```
+dist/NLQ/
+  NLQ            # executável (NLQ.exe no Windows)
+  _internal/     # código e recursos internos (frontend, prompts, skills)
+  .env.example   # copie para .env e preencha as chaves
+  sheets/        # planilhas do usuário (csv/ e xlsx/)
+```
+
+O executável sobe a API em `127.0.0.1`, escolhe uma porta livre a partir de
+`8000`, abre o navegador e encerra com Ctrl+C. O ponto de entrada é
+[`src/nlq/desktop.py`](src/nlq/desktop.py).
+
+### Build automático (GitHub Actions)
+
+O workflow [`.github/workflows/build.yml`](.github/workflows/build.yml) roda em
+`push`/`pull_request` para `main` e `develop`, manualmente
+(`workflow_dispatch`) e em tags `v*`. Em matriz `ubuntu-latest`/`windows-latest`,
+publica os artefatos `NLQ-linux-x86_64.zip` e `NLQ-windows-x86_64.zip`. Em tags
+`v*`, os dois ZIPs também são anexados a um **release**.
+
 ## Estrutura
 
 ```
 src/nlq/
   main.py            # entry point (script `nlq`) — loop de chat com `rich`
+  desktop.py         # entry point do executável — sobe a API local e abre o navegador
   api.py             # API FastAPI — /api/chat, /api/limpar-conversa, /health + serve o frontend
+  paths.py           # resolução de caminhos (desenvolvimento vs. empacotado)
   agent/
     agent.py         # create_nlq_agent(): checkpointer + seleção de modelo + agente → (agente, checkpointer)
     prompts/         # prompt de sistema montado por concatenação
+    skills/          # skills do agente (SKILL.md por pasta)
+  data/              # schema, carregamento e embeddings das planilhas
   tools/
     extract.py       # create_json(): tool de leitura de planilha (CSV e XLSX)
     listar_planilhas.py  # lista_arquivos(): tool de descoberta das planilhas
@@ -218,6 +270,10 @@ frontend/
 sheets/
   csv/               # escopo inicial (nível 1)
   xlsx/              # planilhas multi-aba (níveis 2 e 4)
+nlq.spec             # spec do PyInstaller (distribuição em pasta)
+.env.example         # modelo das variáveis de ambiente
+.github/workflows/
+  build.yml          # build Linux/Windows e release em tags `v*`
 docs/
   architecture.md         # arquitetura atual e fluxo da consulta
   agent.md                # design do agente (modelo, memória, tools de planilha)

@@ -1,128 +1,88 @@
 from pathlib import Path
-import csv
 import json
-import time
-from openpyxl import load_workbook,workbook
 
 from langchain_core.tools import tool
 
-BASE_DIR = Path(__file__).resolve().parent
+from nlq.data.loader import load_records, read_csv, read_workbook
+from nlq.data.schema import build_schema, make_headers as _make_headers
+from nlq.paths import data_dir
 
-_CACHE: dict[tuple[str, float, int], str] = {}
-_CACHE_MAX_ENTRIES = 8
+from time import perf_counter
 
-
-def _perf(label: str, seconds: float | None = None) -> None:
-    if seconds is None:
-        print(f"[PERF] {label}", flush=True)
-    else:
-        print(f"[PERF] {label}: {seconds:.2f}s", flush=True)
+__all__ = ["create_json", "read_csv", "read_excel"]
 
 
-def _cache_key(path: Path) -> tuple[str, float, int]:
-    stat = path.stat()
-    return (str(path.resolve()), stat.st_mtime, stat.st_size)
+def read_excel(path: Path) -> dict[str, list[dict]]:
+    """Lê um XLSX sem cache. Mantido por compatibilidade."""
+    path = Path(path)
+    return read_workbook(path, build_schema(path))
 
-
-def _store_cache(key: tuple[str, float, int], value: str) -> None:
-    path_key = key[0]
-
-    for stale in [k for k in _CACHE if k[0] == path_key and k != key]:
-        del _CACHE[stale]
-
-    while len(_CACHE) >= _CACHE_MAX_ENTRIES:
-        _CACHE.pop(next(iter(_CACHE)))
-
-    _CACHE[key] = value
-
-
-def read_csv(path: Path)-> list[dict]:
-    encodings = ["utf-8-sig","utf-8","cp1252","latin-1"]
-
-    for encoding in encodings:
-        try:
-            with path.open("r", encoding=encoding) as arquivo:
-                return list(csv.DictReader(arquivo))
-        except UnicodeDecodeError:
-            continue
-
-    raise ValueError("Não foi possível ler o arquivo")
-
-
-def read_excel(path: Path) -> dict[str,list[dict]]:
-    t_open = time.perf_counter()
-    wb = load_workbook(path,read_only=True,data_only=True)
-    _perf("open workbook", time.perf_counter() - t_open)
-
-    t_parse = time.perf_counter()
-    data = {}
-
-    for sheet in wb.worksheets:
-            rows = sheet.iter_rows(values_only=True)
-
-            try:
-                headers = next(rows)
-            except StopIteration:
-                data[sheet.title] = []
-                continue
-
-            data[sheet.title] = [
-                dict(zip(headers, row))
-                for row in rows
-            ]
-
-    wb.close()
-    _perf("parse workbook", time.perf_counter() - t_parse)
-
-    return data
 
 @tool
-def create_json(name:str,ext:str)->str:
-
+def create_json(name: str, ext: str) -> str:
     """
-      Lê uma planilha suportada e retorna seu contéudo em formato JSON
+    Extrai TODOS os registros de uma planilha e retorna seu conteúdo em JSON.
 
-      Args:
-         name: nome do arquivo sem extensão, por exemplo academia.
-         ext: extensão do arquivo, por exemplo csv ou xlsx.
+    Use somente quando for necessária uma extração ampla ou completa.
+    Para localizar informações sobre um assunto, prefira buscar_semantico.
+    Para nomes de abas e colunas, use consultar_schema.
+    Não use por padrão para perguntas gerais ou buscas pontuais.
+
+    Args:
+        name: Nome do arquivo sem extensão, por exemplo academia.
+        ext: Extensão do arquivo, por exemplo csv ou xlsx.
     """
 
-    t_total = time.perf_counter()
+    inicio = perf_counter()
+    resultado = None
+    status = "erro"
+    print("[TOOL] create_json inicio", flush=True)
+    try:
+        ext = ext.lower().lstrip(".")
 
-    if ext not in ("csv", "xlsx"):
-        raise ValueError("Extensão não suportada")
+        if ext not in ("csv", "xlsx"):
+            raise ValueError("Extensão não suportada")
 
-    path = BASE_DIR / "../../../sheets/" / ext / (name + "." + ext)
+        path = (data_dir() / ext / f"{name}.{ext}").resolve()
 
-    key = _cache_key(path)
+        if not path.is_file():
+            raise FileNotFoundError(f"Arquivo não encontrado: {path}")
 
-    cached = _CACHE.get(key)
-    if cached is not None:
-        _perf("cache hit")
-        _perf("create_json total", time.perf_counter() - t_total)
-        return cached
+        dados = load_records(path)
 
-    if ext == "csv":
-        t_read = time.perf_counter()
-        dados = read_csv(path)
-        _perf("read csv", time.perf_counter() - t_read)
-    else:
-        dados = read_excel(path)
+        resultado = json.dumps(
+                dados,
+                ensure_ascii=False,
+                indent=2,
+                default=str,
+            )
 
-    t_json = time.perf_counter()
-    json_dados = json.dumps(
-        dados,
-        ensure_ascii=False,
-        indent=2,
-        default=str
-    )
-    _perf("to json", time.perf_counter() - t_json)
+        limite_caracteres = 20_000
+        tamanho = len(resultado)
 
-    _store_cache(key, json_dados)
+        if tamanho > limite_caracteres:
+                resultado = (
+                    "EXTRACAO_BLOQUEADA_POR_TAMANHO\n"
+                    f"O conteúdo completo possui {tamanho} caracteres, "
+                    f"acima do limite de {limite_caracteres}.\n"
+                    "Os registros não foram enviados.\n"
+                    "Use buscar_semantico para perguntas sobre conteúdo. "
+                    "Não repita create_json para este arquivo nesta consulta. "
+                    "Para cálculos completos, use uma consulta estruturada; "
+                    "se não estiver disponível, informe a limitação."
+                )
 
-    _perf("create_json total", time.perf_counter() - t_total)
+        status = "ok"
+        return resultado
+    finally:
+        duracao = perf_counter() - inicio
+        caracteres = len(resultado) if resultado is not None else 0
+        print(
+            f"[PERF] tool=create_json status={status} "
+            f"tempo={duracao:.4f}s caracteres={caracteres}",
+            flush=True,
+        )
 
-    return json_dados
 
 if __name__ == "__main__":
-    print(create_json("academia","csv"))
+    print(create_json.invoke({"name": "matriz", "ext": "xlsx"}))

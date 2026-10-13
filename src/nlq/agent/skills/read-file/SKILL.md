@@ -1,84 +1,91 @@
 ---
 name: read-file
-description: Use esta skill quando o usuário pedir para abrir, ler, mostrar o conteúdo, consultar, analisar, resumir, comparar ou extrair informações de um arquivo, planilha, Excel, XLSX, XLS ou CSV. Sempre use lista_arquivos primeiro para localizar o arquivo correto e obter seu caminho. Depois use create_json para extrair os dados. Se houver mais de um arquivo plausível e não for possível determinar com segurança qual o usuário deseja, peça confirmação antes de abrir.
+description: Use para consultar, ler, resumir ou analisar arquivos. Localize o arquivo com lista_arquivos. Para perguntas sobre conteúdo, incluindo temas gerais, resumos de abas e eixos, use buscar_semantico primeiro. Use consultar_schema para estrutura. Reserve create_json para extração completa explicitamente solicitada ou necessária à tarefa. Peça confirmação se houver ambiguidade.
 ---
 
 # Leitura e análise de arquivos
 
-Para qualquer operação que dependa do conteúdo de um arquivo, localizar primeiro o arquivo correto e somente depois extrair seus dados.
+## Localização
 
-## Fluxo obrigatório
+1. Use lista_arquivos para localizar o arquivo.
+2. Se não encontrar, informe isso sem inventar arquivos ou caminhos.
+3. Se houver múltiplas correspondências plausíveis, peça confirmação.
+4. Com o arquivo identificado, escolha a consulta pelas regras abaixo.
 
-1. Usar `lista_arquivos`.
-2. Procurar o arquivo solicitado nos resultados.
-3. Se nenhum arquivo corresponder:
-   - não usar `create_json`;
-   - informar que o arquivo não foi encontrado;
-   - mostrar correspondências semelhantes, se existirem;
-   - aguardar o usuário indicar um arquivo válido.
-4. Se houver múltiplas correspondências plausíveis:
-   - não escolher arbitrariamente;
-   - mostrar as opções;
-   - pedir confirmação.
-5. Se houver uma única correspondência clara:
-   - obter o caminho;
-   - usar `create_json`;
-   - continuar a leitura ou análise.
+## Regra principal: conteúdo começa pelo RAG
 
-## Regras de identificação
+Para perguntas sobre o conteúdo, use buscar_semantico como primeira
+consulta, inclusive quando o usuário pedir uma explicação geral,
+um resumo ou uma visão geral de uma aba, eixo ou tema.
 
-Considere correspondência clara quando:
+Exemplos:
+- "O eixo 1 aborda o quê no geral?"
+- "Sobre o que é essa planilha?"
+- "Resuma as propostas do eixo 2."
+- "Quais iniciativas tratam de educação?"
+- "O que o arquivo diz sobre saúde?"
 
-- o nome informado corresponder exatamente a um arquivo;
-- houver apenas um arquivo cujo nome seja compatível com o pedido;
-- o contexto da conversa identificar inequivocamente o arquivo.
+Esses pedidos NÃO autorizam extração completa por padrão.
 
-Considere correspondência ambígua quando:
+Não chame consultar_schema antes do RAG por rotina.
+Não chame create_json apenas para confirmar informações já
+sustentadas pelos resultados recuperados.
 
-- houver arquivos com nomes semelhantes;
-- houver versões diferentes do mesmo arquivo;
-- houver o mesmo nome em pastas diferentes;
-- o usuário usar uma descrição genérica que possa indicar mais de um arquivo.
+## Perguntas sobre estrutura
 
-## Regras de segurança
+Use consultar_schema para identificar:
+- Abas disponíveis.
+- Colunas e cabeçalhos.
+- Regiões tabulares.
+- Organização estrutural da planilha.
 
-- Nunca inventar o caminho de um arquivo.
-- Nunca chamar `create_json` antes de localizar o arquivo com `lista_arquivos`.
-- Nunca analisar conteúdo sem antes extraí-lo com `create_json`.
-- Não assumir qual arquivo o usuário quis dizer quando houver ambiguidade.
-- Não alegar ter lido um arquivo se `create_json` não tiver sido utilizado com sucesso.
+Não use o schema sozinho para afirmar o conteúdo dos registros.
 
-## Quando o arquivo não for encontrado
+## Quando usar create_json
 
-Após usar `lista_arquivos`, se nenhum arquivo corresponder ao pedido do usuário:
+Use create_json somente quando:
+- O usuário solicitar explicitamente todos os registros ou conteúdo completo.
+- A tarefa exigir cobertura completa e não houver uma ferramenta
+  estruturada adequada.
+- O RAG já tiver sido consultado e a informação necessária continuar
+  indisponível, com uma necessidade concreta de extração ampla.
 
-1. Não chamar `create_json`.
-2. Não inventar caminhos ou nomes de arquivos.
-3. Informar claramente que o arquivo solicitado não foi encontrado.
-4. Se existirem arquivos com nomes parecidos, mostrar apenas as opções mais prováveis.
-5. Se não houver nenhuma opção parecida, informar que não há correspondência entre os arquivos disponíveis.
-6. Se o usuário tiver informado apenas parte do nome, permitir que ele escolha entre as correspondências encontradas.
-7. Somente continuar a leitura após o usuário indicar ou confirmar um arquivo válido.
+Uma pergunta ser geral ou usar "ler", "analisar" ou "resumir"
+não é motivo suficiente para extrair toda a planilha.
 
-## Exemplo
+## Consultas exatas ou completas
 
-Usuário:
-"abre a planilha de vendas"
+Para contagens, somas, médias, filtros exatos ou comparações
+que precisem de todos os registros, priorize uma ferramenta
+de consulta estruturada.
 
-Resultado de `lista_arquivos`:
-- financeiro.xlsx
-- vendas_2025.csv
-- vendas_2026.csv
+Se não houver essa ferramenta, use extração completa quando
+necessário. Não faça uma busca semântica apenas para cumprir
+uma etapa que não resolve a tarefa.
 
-Comportamento:
-- não escolher automaticamente entre `vendas_2025.csv` e `vendas_2026.csv`;
-- mostrar as duas opções;
-- pedir confirmação do usuário.
+Nunca calcule totais completos usando somente os resultados do RAG.
 
-Se o resultado for:
-- financeiro.xlsx
-- alunos.csv
+## Uso dos resultados do RAG
 
-Comportamento:
-- informar que nenhuma planilha de vendas foi encontrada;
-- não chamar `create_json`.
+- Comece com top_k=5.
+- Confira se os registros respondem à pergunta.
+- Para pedidos sobre uma aba ou eixo, confira a origem de cada resultado.
+- Mencionar uma aba na query não equivale a filtrar por essa aba.
+- Descarte resultados de outro escopo quando não forem pertinentes.
+- Se faltar evidência, refine a consulta ou aumente top_k com um
+  objetivo concreto, respeitando os limites da ferramenta.
+- Não repita a mesma busca sem motivo.
+- Se a evidência continuar insuficiente, informe a limitação ou
+  use outra consulta adequada conforme as regras anteriores.
+
+## Respostas e fidelidade
+
+- Responda apenas com informações sustentadas pelos dados retornados.
+- Para perguntas gerais, prefira um parágrafo curto.
+- Uma busca semântica não garante cobertura completa da planilha.
+- Em resumos com cobertura parcial, use "Nos registros consultados..."
+  e não apresente a resposta como uma síntese exaustiva.
+- Cite a aba e outras referências de origem quando disponíveis.
+- Preserve valores como n/a; não os interprete como zero.
+- Não invente valores, fontes ou consultas realizadas.
+- Não liste intervalos de células e todas as colunas sem necessidade.

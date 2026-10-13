@@ -121,7 +121,7 @@ chave do `.env` e devolve `True` apenas em HTTP 200; qualquer
 | Provider 2         | OpenRouter (`init_chat_model`)                       |
 | Modelo 2           | `qwen/qwen3-30b-a3b-instruct-2507`                   |
 | `temperature`      | `0.1` (respostas determinísticas)                    |
-| `timeout`          | `60000` **milissegundos** (60 s)                     |
+| `timeout`          | `60` s (Groq) / `60000` ms (OpenRouter) — ~60 s por chamada |
 | `max_tokens`       | `7000` (Groq) / `10000` (OpenRouter)                 |
 | Ferramentas        | `create_json`, `lista_arquivos`                      |
 | Memória            | `InMemorySaver` (LangGraph), `thread_id="default"`   |
@@ -195,7 +195,10 @@ Parâmetros relevantes:
 
 - **`temperature`** — manter baixa (0–0.2): o foco é fidelidade, não criatividade.
 - **`max_tokens`** — limita o tamanho da resposta.
-- **`timeout`** — em **milissegundos** (ver armadilhas).
+- **`timeout`** — a unidade depende da integração: `langchain-groq` usa
+  **segundos** (repassado ao SDK Groq / httpx), `langchain-openrouter` usa
+  **milissegundos** (`timeout_ms` no SDK). Ambos configurados para ~60 s por
+  chamada ao modelo — não para a execução inteira do agente.
 
 ### Variáveis de ambiente
 
