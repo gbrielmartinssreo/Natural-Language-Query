@@ -1,5 +1,9 @@
 from langchain.agents import create_agent
 from langchain.agents.middleware import AgentMiddleware, ToolCallLimitMiddleware
+from langchain.agents.middleware.context_editing import (
+    ClearToolUsesEdit,
+    ContextEditingMiddleware,
+)
 from langchain_core.messages import ToolMessage
 from langchain.chat_models import init_chat_model
 from langgraph.checkpoint.memory import InMemorySaver
@@ -48,45 +52,6 @@ def check_openrouter_key() -> bool:
     except requests.RequestException:
         return False
 
-
-REGRAS_DE_CONSULTA = """
-POLÍTICA DE OPERAÇÃO:
-
-Economia de etapas (prioridade máxima):
-- Planeje antes de agir e emita chamadas independentes em paralelo numa
-  MESMA rodada.
-- Prefira UMA consulta suficiente a várias fragmentadas. Não faça uma
-  consulta por aba: use aba="" para todas as abas.
-- Consulte apenas as colunas necessárias; combine filtros na mesma
-  chamada (AND).
-- NÃO faça rodadas de conferência: agrupar e contar já trazem totais.
-- NUNCA repita uma chamada idêntica. Faltou algo? Mude a estratégia ou
-  informe a limitação.
-- Reaproveite schema e dados já obtidos; finalize assim que a resposta
-  estiver fundamentada.
-
-Roteamento (escolha a ferramenta pelo objetivo):
-- Abas, colunas e estrutura → consultar_schema (não por rotina).
-- Filtros, contagens, somas, rankings, agrupamentos, valores distintos e
-  metas → consultar_dados.
-- Significado, sinônimos ou temas → buscar_semantico, apenas quando os
-  critérios não forem verificáveis direto nas colunas.
-- Descoberta de arquivos → lista_arquivos, só quando necessário.
-- Extração completa de linhas → create_json, só se explicitamente pedido.
-
-Dados:
-- Diferencie registros, medidas e valores distintos; não confunda número
-  de linhas com entidades únicas.
-- Use apenas colunas e valores reais; nunca invente nem complete ausentes.
-- Respeite limites/truncamento e diga quando o resultado for parcial.
-- Preserve nomes originais e a aba de origem dos registros.
-
-Resposta:
-- Responda só o que foi perguntado, de forma concisa e direta.
-- NÃO mostre passos, cálculos intermediários, índices/refs nem raciocínio;
-  apresente somente o resultado final.
-- Nunca repita a resposta nem seções.
-"""
 
 class CacheDeChamadas(AgentMiddleware):
     """Evita loops de consultas idênticas repetidas pelo modelo.
@@ -207,6 +172,34 @@ def _openrouter_extras() -> dict:
     return extras
 
 
+def _openrouter_reasoning() -> dict | None:
+    """Configura o raciocínio do modelo no OpenRouter.
+
+    Por padrão o raciocínio é mantido em canal separado
+    (``additional_kwargs["reasoning_content"]``) e NÃO aparece no
+    ``content``. Isso evita que o modelo "pense em voz alta" e
+    despeje os passos no meio da resposta final.
+
+    Controlado por ``NLQ_REASONING``:
+
+    - ``separate`` (padrão): raciocínio em canal próprio (omite o
+      parâmetro e deixa o comportamento padrão do provedor).
+    - ``exclude``: o modelo raciocina, mas o raciocínio não é
+      devolvido na resposta.
+    - ``off``: desliga o raciocínio (mais rápido; em tarefas
+      complexas o modelo pode narrar passos dentro do ``content``).
+    """
+    modo = os.getenv("NLQ_REASONING", "separate").strip().lower()
+
+    if modo in ("off", "none", "disabled"):
+        return {"enabled": False}
+
+    if modo in ("exclude", "hidden"):
+        return {"exclude": True}
+
+    return None
+
+
 def create_nlq_agent():
     checkpointer = InMemorySaver()
 
@@ -216,6 +209,7 @@ def create_nlq_agent():
     )
 
     modelo_override = os.getenv("NLQ_MODEL", "").strip()
+    max_tokens = int(os.getenv("NLQ_MAX_TOKENS", "5000"))
 
     if modelo_override:
         kwargs = {}
@@ -223,14 +217,15 @@ def create_nlq_agent():
         if modelo_override.startswith("openrouter:"):
             kwargs.update(_openrouter_extras())
 
-            if "deepseek" in modelo_override:
-                kwargs["reasoning"] = {"effort": "none"}
+            reasoning = _openrouter_reasoning()
+            if reasoning is not None:
+                kwargs["reasoning"] = reasoning
 
         model = init_chat_model(
             modelo_override,
             temperature=0.1,
             timeout=60000,
-            max_tokens=2500,
+            max_tokens=max_tokens,
             **kwargs,
         )
         print(
@@ -244,21 +239,26 @@ def create_nlq_agent():
             model_provider="groq",
             temperature=0.1,
             timeout=60,
-            max_tokens=2500,
+            max_tokens=max_tokens,
         )
         print("[MODELO] Groq: openai/gpt-oss-120b", flush=True)
 
     else:
+        kwargs = _openrouter_extras()
+
+        reasoning = _openrouter_reasoning()
+        if reasoning is not None:
+            kwargs["reasoning"] = reasoning
+
         model = init_chat_model(
             "openrouter:deepseek/deepseek-v4-flash-0731",
             temperature=0.1,
             timeout=60000,
-            max_tokens=2500,
-            reasoning={"effort": "none"},
-            **_openrouter_extras(),
+            max_tokens=max_tokens,
+            **kwargs,
         )
         print(
-            "[MODELO] OpenRouter: deepseek/deepseek-v4-flash-latest-0731",
+            f"[MODELO] OpenRouter: deepseek/deepseek-v4-flash-latest-0731",
             flush=True,
         )
 
@@ -292,9 +292,26 @@ def create_nlq_agent():
         [
             load_prompt("system_base.md"),
             load_prompt("specific_role.md"),
-            REGRAS_DE_CONSULTA,
+            load_prompt("regra_consulta.md"),
         ]
     )
+
+    # Poda algorítmica determinística: quando o histórico do thread excede
+    # o gatilho (tokens aproximados), os resultados de ferramenta mais
+    # antigos são substituídos por "[cleared]" na mensagem enviada ao
+    # modelo. O checkpointer mantém o histórico completo, e o
+    # CacheDeChamadas (TTL 300s) evita custo extra de re-execução caso o
+    # modelo precise reconsultar algo podado.
+    trigger = int(os.getenv("NLQ_CONTEXT_TRIGGER_TOKENS", "25000"))
+    keep = int(os.getenv("NLQ_CONTEXT_KEEP_TOOL_RESULTS", "5"))
+
+    #
+    # Teto de chamadas de ferramenta por execução. Com
+    # exit_behavior="continue" o modelo finaliza com o que já tem em vez
+    # de travar. Suba para varreduras extensas (ex.: várias abas de uma
+    # planilha grande), sob pena de respostas parciais.
+    #
+    run_limit = int(os.getenv("NLQ_TOOL_CALL_LIMIT", "25"))
 
     agent = create_agent(
         model=model,
@@ -303,7 +320,18 @@ def create_nlq_agent():
         system_prompt=system_prompt,
         middleware=[
             CacheDeChamadas(),
-            ToolCallLimitMiddleware(run_limit=10, exit_behavior="continue"),
+            ContextEditingMiddleware(
+                edits=[
+                    ClearToolUsesEdit(
+                        trigger=trigger,
+                        keep=keep,
+                    )
+                ],
+            ),
+            ToolCallLimitMiddleware(
+                run_limit=run_limit,
+                exit_behavior="continue",
+            ),
             TratarErroDeTool(),
         ],
     )

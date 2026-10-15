@@ -266,6 +266,49 @@ def _token_do_chunk(payload) -> str:
     return ""
 
 
+def _reasoning_do_chunk(payload) -> str:
+    """
+    Extrai o raciocínio (``reasoning_content``) de um chunk do modo
+    "messages".
+
+    Modelos com raciocínio (ex.: DeepSeek no OpenRouter) enviam o
+    "pensar em voz alta" em ``additional_kwargs["reasoning_content"]``,
+    separado do ``content``. Devolvemos esse texto para exibi-lo à parte,
+    sem contaminar a resposta final.
+    """
+
+    if not isinstance(payload, tuple) or len(payload) != 2:
+        return ""
+
+    chunk, _metadata = payload
+
+    if not isinstance(chunk, AIMessageChunk):
+        return ""
+
+    extras = getattr(chunk, "additional_kwargs", None) or {}
+
+    raciocinio = extras.get("reasoning_content")
+
+    if isinstance(raciocinio, str):
+        return raciocinio
+
+    if isinstance(raciocinio, list):
+        partes = []
+
+        for bloco in raciocinio:
+            if isinstance(bloco, str):
+                partes.append(bloco)
+            elif (
+                isinstance(bloco, dict)
+                and bloco.get("type") == "text"
+            ):
+                partes.append(bloco.get("text") or "")
+
+        return "".join(partes)
+
+    return ""
+
+
 def _executar_agente(
     agente,
     entrada: dict,
@@ -292,12 +335,19 @@ def _executar_agente(
 
         ultimo_estado = None
         buffer_tokens: list[str] = []
+        buffer_thinking: list[str] = []
 
         def enviar_tokens() -> None:
             """Publica o lote acumulado de tokens (se houver)."""
             if buffer_tokens:
                 publicar(("token", "".join(buffer_tokens)))
                 buffer_tokens.clear()
+
+        def enviar_thinking() -> None:
+            """Publica o lote acumulado de raciocínio (se houver)."""
+            if buffer_thinking:
+                publicar(("thinking", "".join(buffer_thinking)))
+                buffer_thinking.clear()
 
         t_agent = time.perf_counter()
 
@@ -322,10 +372,22 @@ def _executar_agente(
                     if sum(map(len, buffer_tokens)) >= TAMANHO_LOTE_TOKEN:
                         enviar_tokens()
 
+                raciocinio = _reasoning_do_chunk(payload)
+
+                if raciocinio:
+                    buffer_thinking.append(raciocinio)
+
+                    if (
+                        sum(map(len, buffer_thinking))
+                        >= TAMANHO_LOTE_TOKEN
+                    ):
+                        enviar_thinking()
+
                 continue
 
             # Modo "values": estado consolidado após o superstep.
             enviar_tokens()
+            enviar_thinking()
             ultimo_estado = payload
 
             status = _status_do_estado(
@@ -340,6 +402,7 @@ def _executar_agente(
             )
 
         enviar_tokens()
+        enviar_thinking()
 
         duracao = (
             time.perf_counter()
@@ -599,6 +662,22 @@ async def chat(
                             {
                                 "type":
                                     "token",
+                                "content":
+                                    payload,
+                            }
+                        )
+
+                #
+                # RACIOCÍNIO DO MODELO (canal separado)
+                #
+                elif tipo == "thinking":
+
+                    if payload:
+
+                        yield _linha(
+                            {
+                                "type":
+                                    "thinking",
                                 "content":
                                     payload,
                             }

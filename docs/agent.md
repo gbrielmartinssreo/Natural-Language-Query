@@ -16,14 +16,16 @@ Definido em `create_nlq_agent()` — `src/nlq/agent/agent.py`. Usa `langchain.ag
 
 ```python
 checkpointer = InMemorySaver()
+max_tokens = int(os.getenv("NLQ_MAX_TOKENS", "5000"))
 
 model_openrouter = init_chat_model(
     "openrouter:deepseek/deepseek-v4-flash-0731",
     temperature=0.1,
     timeout=60000,
-    max_tokens=2500,
-    reasoning={"effort": "none"},
+    max_tokens=max_tokens,
     session_id=...,                 # roteamento fixo p/ cache de prompt
+    # raciocínio separado por padrão (NLQ_REASONING=separate):
+    # vai para additional_kwargs["reasoning_content"] e NÃO polui o content
 )
 
 model_groq = init_chat_model(
@@ -31,7 +33,7 @@ model_groq = init_chat_model(
     model_provider="groq",
     temperature=0.1,
     timeout=60,
-    max_tokens=2500,
+    max_tokens=max_tokens,
 )
 
 if os.getenv("API_SELECT") == "groq" or not check_openrouter_key():
@@ -110,17 +112,19 @@ A decisão é feita por `usar_groq = (API_SELECT=='groq' or not check_openrouter
 | Provider 1         | Groq (`init_chat_model`, `model_provider`)          |
 | Modelo 1           | `openai/gpt-oss-120b`                                |
 | Provider 2         | OpenRouter (`init_chat_model`)                       |
-| Modelo 2           | `deepseek/deepseek-v4-flash-0731` (`reasoning=effort none`) |
+| Modelo 2           | `deepseek/deepseek-v4-flash-0731` (raciocínio em canal separado) |
 | `temperature`      | `0.1` (respostas determinísticas)                    |
 | `timeout`          | `60` s (Groq) / `60000` ms (OpenRouter) — ~60 s por chamada |
-| `max_tokens`       | `2500` (ambos)                                       |
+| `max_tokens`       | `5000` (padrão; `NLQ_MAX_TOKENS`)                    |
 | Ferramentas        | `create_json`, `goat`, `lista_arquivos`, `consultar_schema`, `buscar_semantico`, `consultar_dados` |
-| Middleware         | `CacheDeChamadas`, `ToolCallLimitMiddleware(10)`, `TratarErroDeTool` |
+| Middleware         | `CacheDeChamadas`, `ContextEditingMiddleware`, `ToolCallLimitMiddleware(25)`, `TratarErroDeTool` |
 | Memória            | `InMemorySaver` (LangGraph)                          |
 | Prompt de sistema  | `system_base.md` + `specific_role.md` + `REGRAS_DE_CONSULTA` |
 | Skills             | pasta `skills/` (metadados no disco; roteamento pelas descrições das ferramentas) |
 | Override de modelo | `NLQ_MODEL`                                          |
 | Cache/roteamento   | `NLQ_SESSION_ID`, `NLQ_PIN_PROVIDER`, `NLQ_PROVIDER` |
+| Raciocínio         | `NLQ_REASONING` (`separate` padrão / `exclude` / `off`) |
+| Limites            | `NLQ_MAX_ROWS` (500), `NLQ_ROWS_DEFAULT` (20), `NLQ_TOOL_CALL_LIMIT` (25) |
 
 ### Desempenho (otimizações)
 
@@ -132,8 +136,9 @@ Pandas. Medidas aplicadas:
   caiu de ~25.900 para ~13.900 caracteres.
 - **Cache de prompt** — `session_id` estável faz o OpenRouter usar roteamento
   fixo, aumentando `cache_read` entre as chamadas.
-- **Saída limitada** — `max_tokens=2500` evita respostas que estouram o teto
-  (antes: uma geração de 10.000 tokens levava ~65 s).
+- **Saída limitada** — `NLQ_MAX_TOKENS` (padrão `5000`) evita respostas que
+  estouram o teto (antes: uma geração de 10.000 tokens levava ~65 s). Respostas
+  que atingem o limite são sinalizadas como interrompidas.
 - **Anti-loop** — `CacheDeChamadas` devolve resultados repetidos e
   `ToolCallLimitMiddleware(10)` impede exploração sem limites.
 - **Warm-up** — esquema/registros (e índice semântico) carregados em segundo
@@ -325,7 +330,7 @@ O prompt completo é passado a `create_agent`. Os `SKILL.md` permanecem no disco
 ### Payload e contexto
 
 - **`indent=2` no JSON** aumenta o payload; XLSX multi-aba pode se aproximar do
-  `max_tokens` (2500 em ambos os provedores).
+  `max_tokens` (`NLQ_MAX_TOKENS`, padrão `5000`).
 - **Ausência de dado não sinalizada** pela tool (ver §4).
 - **Falha de leitura sem tratamento** — erros sobem crus para o LLM (ver §4).
 

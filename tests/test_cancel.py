@@ -384,6 +384,59 @@ class TestHelpers(unittest.TestCase):
         # Payload fora do formato esperado não quebra.
         self.assertEqual(api._token_do_chunk("solto"), "")
 
+    def test_reasoning_do_chunk(self):
+        # Raciocínio em texto simples.
+        self.assertEqual(
+            api._reasoning_do_chunk(
+                (
+                    AIMessageChunk(
+                        content="",
+                        additional_kwargs={
+                            "reasoning_content": "pensando"
+                        },
+                    ),
+                    {},
+                )
+            ),
+            "pensando",
+        )
+
+        # Raciocínio em blocos.
+        self.assertEqual(
+            api._reasoning_do_chunk(
+                (
+                    AIMessageChunk(
+                        content="",
+                        additional_kwargs={
+                            "reasoning_content": [
+                                {"type": "text", "text": "pas"},
+                                {"type": "text", "text": "so"},
+                            ]
+                        },
+                    ),
+                    {},
+                )
+            ),
+            "passo",
+        )
+
+        # Sem raciocínio.
+        self.assertEqual(
+            api._reasoning_do_chunk((_chunk("resposta"), {})),
+            "",
+        )
+
+        # Mensagem de ferramenta não traz raciocínio.
+        self.assertEqual(
+            api._reasoning_do_chunk(
+                (ToolMessage(content="r", tool_call_id="1"), {})
+            ),
+            "",
+        )
+
+        # Payload fora do formato esperado não quebra.
+        self.assertEqual(api._reasoning_do_chunk("solto"), "")
+
     def test_texto_final(self):
         self.assertEqual(
             api._texto_final(type("M", (), {"content": "a"})()),

@@ -178,7 +178,7 @@ button { font: inherit; cursor: pointer; }
 }
 
 /* ===== Respostas do assistente (markdown) ================================= */
-.msg.assistant { line-height: 1.6; overflow-wrap: anywhere; }
+.msg.assistant { flex-direction: column; line-height: 1.6; overflow-wrap: anywhere; }
 .msg.assistant > .bubble > :first-child { margin-top: 0; }
 .msg.assistant > .bubble > :last-child { margin-bottom: 0; }
 .msg.assistant p { margin: 0 0 .75em; }
@@ -233,6 +233,61 @@ button { font: inherit; cursor: pointer; }
   padding: 1em; border-radius: 10px; overflow-x: auto; margin: .5em 0 1em;
 }
 .msg.assistant pre code { background: none; border: 0; padding: 0; }
+
+/* Cursor piscando enquanto a resposta ainda está chegando */
+.msg.assistant .bubble.streaming::after {
+  content: "";
+  display: inline-block;
+  width: .5em; height: 1.05em;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  background: currentColor;
+  opacity: .6;
+  border-radius: 1px;
+  animation: cursorPisca 1s steps(2, start) infinite;
+}
+@keyframes cursorPisca {
+  0%, 50% { opacity: .6; }
+  50.01%, 100% { opacity: 0; }
+}
+
+/* Raciocínio do modelo (bloco separado e dobável) */
+.msg.assistant .thinking {
+  margin: 0 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--card);
+  overflow: hidden;
+}
+.msg.assistant .thinking > summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 7px 12px;
+  color: var(--muted);
+  font-size: 12.5px;
+  font-weight: 600;
+  user-select: none;
+}
+.msg.assistant .thinking > summary::-webkit-details-marker { display: none; }
+.msg.assistant .thinking > summary::before {
+  content: "▸";
+  display: inline-block;
+  margin-right: 7px;
+  transition: transform .12s ease;
+}
+.msg.assistant .thinking[open] > summary::before { transform: rotate(90deg); }
+.msg.assistant .thinking[open] > summary { border-bottom: 1px solid var(--border); }
+.msg.assistant .thinking-body {
+  padding: 10px 13px;
+  color: var(--text-dim);
+  font-size: 13px;
+  line-height: 1.55;
+  max-height: 340px;
+  overflow: auto;
+}
+.msg.assistant .thinking-body :first-child { margin-top: 0; }
+.msg.assistant .thinking-body :last-child { margin-bottom: 0; }
+.msg.assistant .thinking-body p { margin: 0 0 .6em; }
 
 /* ===== Composer ========================================================== */
 .composer-wrap {

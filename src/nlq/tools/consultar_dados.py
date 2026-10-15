@@ -22,6 +22,7 @@ conte apenas esses registros, sem duplicação::
 from __future__ import annotations
 
 import json
+import os
 import re
 from pathlib import Path
 from time import perf_counter
@@ -65,8 +66,18 @@ AUSENTES = {
     "--",
 }
 
-LIMITE_PADRAO = 20
-LIMITE_MAX = 100
+def _env_int(nome: str, padrao: int) -> int:
+    try:
+        return int(os.getenv(nome, str(padrao)))
+    except (TypeError, ValueError):
+        return padrao
+
+
+LIMITE_PADRAO = _env_int("NLQ_ROWS_DEFAULT", 20)
+# Teto de linhas/grupos devolvidos por consulta. Alto o bastante para o
+# agente ler uma aba inteira numa única chamada (evita varredura
+# fragmentada e estouro do limite de chamadas de ferramenta).
+LIMITE_MAX = _env_int("NLQ_MAX_ROWS", 500)
 LIMITE_CARACTERES = 300
 # Consolidação: máximo de valores distintos por grupo e tamanho máximo de
 # cada valor transcrito (preserva a transcrição exata dentro do teto).
@@ -935,8 +946,10 @@ def consultar_dados(
     Operadores: igual, diferente, maior, maior_igual, menor, menor_igual,
     contem, nao_contem, vazio, nao_vazio, em. 'contem' é parcial.
     aba="" consulta todas as abas; 'aba'/'eixo' em agrupar_por separa por
-    aba. Limites: até 100 grupos/linhas (sinalizado por 'truncado') e até
-    50 valores por grupo; não apresente resultado parcial como exaustivo.
+    aba. Limites: linhas/grupos até o teto configurado (padrão 500,
+    sinalizado por 'truncado') e até 50 valores por grupo; não apresente
+    resultado parcial como exaustivo. Para ler uma aba inteira, peça um
+    'limite' alto o suficiente numa única chamada.
 
     Args:
         name: Nome do arquivo sem extensão.
@@ -952,7 +965,8 @@ def consultar_dados(
         colunas: Campos projetados em filtrar/ordenar, separados por
             vírgula; 'aba' expõe a origem e _origem é sempre devolvido.
         refs: Lista de {aba, indice} recuperada pelo RAG, ou JSON.
-        limite: Até 100 linhas ou grupos retornados (padrão 20).
+        limite: Nº de linhas ou grupos retornados (padrão 20; teto
+            configurável por NLQ_MAX_ROWS, padrão 500).
         ordenar_por: Coluna usada na operação ordenar.
         ordem: 'asc' ou 'desc' para ordenar.
     """
