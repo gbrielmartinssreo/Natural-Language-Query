@@ -1,5 +1,10 @@
-"""Busca semântica com índices mantidos em memória."""
+"""Busca semântica com índices mantidos em memória e em disco."""
 
+import hashlib
+import os
+import pickle
+import tempfile
+import threading
 from dataclasses import dataclass
 from math import sqrt
 from pathlib import Path
@@ -20,6 +25,84 @@ class SemanticIndex:
 # Um índice por caminho de arquivo.
 _INDEX_CACHE: dict[Path, SemanticIndex] = {}
 
+# Serializa a construção do índice: chamadas concorrentes para o mesmo
+# arquivo reutilizam o primeiro resultado em vez de reconstruí-lo.
+_INDEX_LOCK = threading.Lock()
+
+# Cache de embeddings de consulta (independente do arquivo).
+_QUERY_CACHE: dict[str, list[float]] = {}
+_QUERY_CACHE_MAX = 256
+
+
+# Versão do formato do cache em disco. Mude quando a lógica de
+# construção dos documentos/vetores mudar.
+_CACHE_VERSION = 1
+
+
+def _cache_dir() -> Path:
+    base = os.getenv("XDG_CACHE_HOME") or tempfile.gettempdir()
+    return Path(base) / "nlq-cache"
+
+
+def _cache_file(path: Path, fingerprint: tuple[int, int]) -> Path:
+    raw = (
+        f"{_CACHE_VERSION}|{path}|{fingerprint[0]}|{fingerprint[1]}"
+    ).encode()
+    digest = hashlib.sha256(raw).hexdigest()[:16]
+    return _cache_dir() / f"index-{digest}.pkl"
+
+
+def _load_index_from_disk(
+    path: Path,
+    fingerprint: tuple[int, int],
+) -> SemanticIndex | None:
+    """Carrega um índice persistido, se ele corresponder ao arquivo."""
+    try:
+        cache_file = _cache_file(path, fingerprint)
+
+        if not cache_file.is_file():
+            return None
+
+        with cache_file.open("rb") as arquivo:
+            data = pickle.load(arquivo)
+
+        if data.get("fingerprint") != fingerprint:
+            return None
+
+        return SemanticIndex(
+            fingerprint=fingerprint,
+            documents=data["documents"],
+            vectors=data["vectors"],
+        )
+    except Exception:
+        # Cache corrompido ou incompatível: reconstrói do zero.
+        return None
+
+
+def _save_index_to_disk(path: Path, index: SemanticIndex) -> None:
+    """Persiste o índice para reutilização em execuções futuras."""
+    try:
+        cache_dir = _cache_dir()
+        cache_dir.mkdir(parents=True, exist_ok=True)
+
+        cache_file = _cache_file(path, index.fingerprint)
+        temporario = cache_file.with_suffix(".tmp")
+
+        with temporario.open("wb") as arquivo:
+            pickle.dump(
+                {
+                    "fingerprint": index.fingerprint,
+                    "documents": index.documents,
+                    "vectors": index.vectors,
+                },
+                arquivo,
+            )
+
+        os.replace(temporario, cache_file)
+    except Exception:
+        # Persistência é opcional: falhas não devem quebrar a busca.
+        pass
+
 
 def _get_index(path: str | Path) -> SemanticIndex:
     path = Path(path).resolve()
@@ -31,19 +114,52 @@ def _get_index(path: str | Path) -> SemanticIndex:
     if cached is not None and cached.fingerprint == fingerprint:
         return cached
 
-    documents = build_documents(path)
-    vectors = embed_texts(
-        [document.page_content for document in documents]
-    )
+    with _INDEX_LOCK:
+        # Outra thread pode ter construído o índice enquanto esperávamos.
+        cached = _INDEX_CACHE.get(path)
 
-    index = SemanticIndex(
-        fingerprint=fingerprint,
-        documents=documents,
-        vectors=vectors,
-    )
+        if cached is not None and cached.fingerprint == fingerprint:
+            return cached
 
-    _INDEX_CACHE[path] = index
-    return index
+        index = _load_index_from_disk(path, fingerprint)
+
+        if index is None:
+            documents = build_documents(path)
+            vectors = embed_texts(
+                [document.page_content for document in documents]
+            )
+
+            index = SemanticIndex(
+                fingerprint=fingerprint,
+                documents=documents,
+                vectors=vectors,
+            )
+
+            _save_index_to_disk(path, index)
+
+        _INDEX_CACHE[path] = index
+        return index
+
+
+def warm_index(path: str | Path) -> None:
+    """Pré-carrega o índice de um arquivo (uso em warm-up)."""
+    _get_index(path)
+
+
+def _embed_query(query: str) -> list[float]:
+    """Gera (ou reaproveita) o embedding de uma consulta."""
+    cached = _QUERY_CACHE.get(query)
+
+    if cached is not None:
+        return cached
+
+    vector = embed_texts([query])[0]
+
+    if len(_QUERY_CACHE) >= _QUERY_CACHE_MAX:
+        _QUERY_CACHE.pop(next(iter(_QUERY_CACHE)))
+
+    _QUERY_CACHE[query] = vector
+    return vector
 
 
 def _cosine_similarity(
@@ -77,7 +193,7 @@ def search_documents(
     if not index.documents:
         return []
 
-    query_vector = embed_texts([query])[0]
+    query_vector = _embed_query(query)
 
     ranked = [
         (

@@ -7,13 +7,14 @@ import time
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from langchain_core.messages import ToolMessage
+from langchain_core.messages import AIMessageChunk, ToolMessage
 from langgraph.errors import GraphDrained
 from langgraph.runtime import RunControl
 from pydantic import BaseModel
 
 from nlq.agent.agent import create_nlq_agent
 from nlq.paths import frontend_dir, load_env
+from nlq.warmup import aquecer_em_segundo_plano
 
 
 logger = logging.getLogger("nlq.api")
@@ -26,6 +27,10 @@ FILA_MAX = 64
 
 # Intervalo entre verificações de desconexão do cliente.
 POLL_S = 0.1
+
+# Tamanho do lote de tokens antes de publicar um evento.
+# Evita uma linha NDJSON por token do modelo.
+TAMANHO_LOTE_TOKEN = 24
 
 MENSAGEM_ERRO = "Não foi possível concluir a consulta."
 
@@ -47,6 +52,10 @@ load_env()
 app = FastAPI()
 
 agent, checkpointer = create_nlq_agent()
+
+# Pré-carrega schema e registros em segundo plano para que a primeira
+# consulta não pague a leitura fria das planilhas.
+aquecer_em_segundo_plano()
 
 # Conversas com uma consulta em andamento.
 #
@@ -195,6 +204,111 @@ def _texto_final(mensagem) -> str:
     return str(content)
 
 
+def _separar_evento(item) -> tuple[str, object]:
+    """
+    Normaliza um item do stream do LangGraph em (modo, payload).
+
+    Com ``stream_mode=["messages", "values"]`` o LangGraph entrega
+    tuplas ``(modo, payload)``. Quando ``stream_mode`` é uma string
+    única, entrega apenas o payload — tratado como "values".
+    """
+
+    if (
+        isinstance(item, tuple)
+        and len(item) == 2
+        and isinstance(item[0], str)
+    ):
+        return item[0], item[1]
+
+    return "values", item
+
+
+def _token_do_chunk(payload) -> str:
+    """
+    Extrai o texto de um chunk de token do modo "messages".
+
+    Ignora chunks de chamada de ferramenta (argumentos JSON) e
+    conteúdos que não sejam texto, para não vazar dados internos.
+    """
+
+    if not isinstance(payload, tuple) or len(payload) != 2:
+        return ""
+
+    chunk, _metadata = payload
+
+    # O modo "messages" também emite mensagens de ferramenta;
+    # apenas tokens do próprio modelo são transmitidos.
+    if not isinstance(chunk, AIMessageChunk):
+        return ""
+
+    if getattr(chunk, "tool_call_chunks", None):
+        return ""
+
+    content = getattr(chunk, "content", "")
+
+    if isinstance(content, str):
+        return content
+
+    if isinstance(content, list):
+        partes = []
+
+        for bloco in content:
+            if isinstance(bloco, str):
+                partes.append(bloco)
+            elif (
+                isinstance(bloco, dict)
+                and bloco.get("type") == "text"
+            ):
+                partes.append(bloco.get("text") or "")
+
+        return "".join(partes)
+
+    return ""
+
+
+def _reasoning_do_chunk(payload) -> str:
+    """
+    Extrai o raciocínio (``reasoning_content``) de um chunk do modo
+    "messages".
+
+    Modelos com raciocínio (ex.: DeepSeek no OpenRouter) enviam o
+    "pensar em voz alta" em ``additional_kwargs["reasoning_content"]``,
+    separado do ``content``. Devolvemos esse texto para exibi-lo à parte,
+    sem contaminar a resposta final.
+    """
+
+    if not isinstance(payload, tuple) or len(payload) != 2:
+        return ""
+
+    chunk, _metadata = payload
+
+    if not isinstance(chunk, AIMessageChunk):
+        return ""
+
+    extras = getattr(chunk, "additional_kwargs", None) or {}
+
+    raciocinio = extras.get("reasoning_content")
+
+    if isinstance(raciocinio, str):
+        return raciocinio
+
+    if isinstance(raciocinio, list):
+        partes = []
+
+        for bloco in raciocinio:
+            if isinstance(bloco, str):
+                partes.append(bloco)
+            elif (
+                isinstance(bloco, dict)
+                and bloco.get("type") == "text"
+            ):
+                partes.append(bloco.get("text") or "")
+
+        return "".join(partes)
+
+    return ""
+
+
 def _executar_agente(
     agente,
     entrada: dict,
@@ -220,23 +334,64 @@ def _executar_agente(
     try:
 
         ultimo_estado = None
+        buffer_tokens: list[str] = []
+        buffer_thinking: list[str] = []
+
+        def enviar_tokens() -> None:
+            """Publica o lote acumulado de tokens (se houver)."""
+            if buffer_tokens:
+                publicar(("token", "".join(buffer_tokens)))
+                buffer_tokens.clear()
+
+        def enviar_thinking() -> None:
+            """Publica o lote acumulado de raciocínio (se houver)."""
+            if buffer_thinking:
+                publicar(("thinking", "".join(buffer_thinking)))
+                buffer_thinking.clear()
 
         t_agent = time.perf_counter()
 
-        for estado in agente.stream(
+        for item in agente.stream(
             entrada,
             config=config,
-            stream_mode="values",
+            stream_mode=["messages", "values"],
             control=control,
         ):
 
             if cancelado.is_set():
                 break
 
-            ultimo_estado = estado
+            modo, payload = _separar_evento(item)
+
+            if modo == "messages":
+                token = _token_do_chunk(payload)
+
+                if token:
+                    buffer_tokens.append(token)
+
+                    if sum(map(len, buffer_tokens)) >= TAMANHO_LOTE_TOKEN:
+                        enviar_tokens()
+
+                raciocinio = _reasoning_do_chunk(payload)
+
+                if raciocinio:
+                    buffer_thinking.append(raciocinio)
+
+                    if (
+                        sum(map(len, buffer_thinking))
+                        >= TAMANHO_LOTE_TOKEN
+                    ):
+                        enviar_thinking()
+
+                continue
+
+            # Modo "values": estado consolidado após o superstep.
+            enviar_tokens()
+            enviar_thinking()
+            ultimo_estado = payload
 
             status = _status_do_estado(
-                estado
+                payload
             )
 
             publicar(
@@ -245,6 +400,9 @@ def _executar_agente(
                     status,
                 )
             )
+
+        enviar_tokens()
+        enviar_thinking()
 
         duracao = (
             time.perf_counter()
@@ -490,6 +648,38 @@ async def chat(
                                     "status",
                                 "content":
                                     status,
+                            }
+                        )
+
+                #
+                # TOKENS DA RESPOSTA (streaming parcial)
+                #
+                elif tipo == "token":
+
+                    if payload:
+
+                        yield _linha(
+                            {
+                                "type":
+                                    "token",
+                                "content":
+                                    payload,
+                            }
+                        )
+
+                #
+                # RACIOCÍNIO DO MODELO (canal separado)
+                #
+                elif tipo == "thinking":
+
+                    if payload:
+
+                        yield _linha(
+                            {
+                                "type":
+                                    "thinking",
+                                "content":
+                                    payload,
                             }
                         )
 

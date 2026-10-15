@@ -28,7 +28,7 @@ Usuário → Pergunta → Agente (memória da sessão) → LLM
    → LLM → Resposta
 ```
 
-A API FastAPI (`src/nlq/api.py`) oferece **resposta em streaming** (NDJSON linha a linha) com eventos de status, resultado, erro e `ping` (keep-alive), além de cancelamento cooperativo. O agente é acessível por duas entradas — CLI (`src/nlq/main.py`) e API — ambas compartilhando a mesma sessão em memória (`thread_id="default"`).
+A API FastAPI (`src/nlq/api.py`) oferece **resposta em streaming** (NDJSON linha a linha) com eventos de status, tokens da resposta, resultado, erro e `ping` (keep-alive), além de cancelamento cooperativo. O agente é acessível por duas entradas — CLI (`src/nlq/main.py`) e API — ambas compartilhando a mesma sessão em memória (`thread_id="default"`).
 
 Detalhes em [`docs/architecture.md`](docs/architecture.md).
 
@@ -54,7 +54,7 @@ turnos anteriores da mesma execução, e a interface é `rich` (prompt, spinner 
 raciocínio e Painel com Markdown na resposta).
 
 Há também uma **API FastAPI** (`src/nlq/api.py`) expondo o mesmo agente por HTTP
-com **streaming NDJSON** (eventos `status`, `result`, `error`, `ping`), que serve ao mesmo tempo a
+com **streaming NDJSON** (eventos `status`, `token`, `result`, `error`, `ping`), que serve ao mesmo tempo a
 **interface web** (`frontend/`, issue
 [#19](https://github.com/gbrielmartinssreo/Natural-Language-Query/issues/19),
 **em andamento**): chat, loading, cancelamento de requisição, exibição de resposta e tratamento visual de
@@ -141,13 +141,15 @@ API_SELECT=openrouter   # ou groq
 | `API_SELECT`  | Provider                                        |
 |----------------|-------------------------------------------------|
 | `groq`         | Groq — `openai/gpt-oss-120b`                    |
-| `openrouter`   | OpenRouter — `qwen/qwen3-30b-a3b-instruct-2507` |
+| `openrouter`   | OpenRouter — `deepseek/deepseek-v4-flash-0731`  |
 | ausente        | Groq se a chave do OpenRouter for inválida; OpenRouter caso contrário |
 | outro valor   | tratado como não-forçando Groq (segue lógica de detecção) |
 
-Os dois modelos usam `temperature=0.1` e `max_tokens` de **7000** (Groq) ou
-**10000** (OpenRouter). O `timeout` fica em ~60 s por chamada ao modelo:
-**60 s** (segundos) no Groq e **60000 ms** no OpenRouter (unidades distintas por integração).
+Os dois modelos usam `temperature=0.1` e `max_tokens` de **2500**. O `timeout`
+fica em ~60 s por chamada ao modelo: **60 s** (segundos) no Groq e **60000 ms**
+no OpenRouter (unidades distintas por integração). A variável `NLQ_MODEL`
+sobrepõe o modelo; `NLQ_SESSION_ID`/`NLQ_PIN_PROVIDER`/`NLQ_PROVIDER` ajustam
+roteamento e cache de prompt no OpenRouter.
 
 A busca semântica usa **embeddings** (`text-embedding-3-small`) via API OpenAI, exigindo `OPENAI_API_KEY` (já presente em `.env.example`).
 
@@ -175,8 +177,8 @@ uv run fastapi run    # produção
 A mesma API serve o frontend estático (`frontend/`): chat com balões de
 mensagem, markdown (tabelas e código), loading animado durante o processamento,
 indicador da planilha consultada, alternância de tema claro/escuro e status do
-backend. A resposta não usa streaming — o agente processa inteiro e devolve o
-resultado de uma vez.
+backend. A resposta usa streaming de tokens: o texto do modelo aparece
+progressivamente e, ao final, é substituído pelo markdown renderizado.
 
 ### API
 
@@ -195,7 +197,7 @@ carregado no startup, então as mesmas chaves de API são necessárias.
 |---------------------------|--------|-----------------------------------------------------------------------------------------------|
 | `/`                       | GET    | serve o frontend (`frontend/index.html`, via `StaticFiles(html=True)`)                        |
 | `/health`                 | GET    | health check (`{"status": "ok"}`)                                                             |
-| `/api/chat`               | POST   | streaming NDJSON com eventos (`status`, `result`, `error`, `ping`). Corpo: `{"message": ..., "thread_id": ...}`. Evento `result` traz `response` e `planilha` (`{"nome": ..., "ext": ...}` ou `null`). |
+| `/api/chat`               | POST   | streaming NDJSON com eventos (`status`, `token`, `result`, `error`, `ping`). Corpo: `{"message": ..., "thread_id": ...}`. Eventos `token` trazem o texto parcial (`content`); o evento `result` traz `response` e `planilha` (`{"nome": ..., "ext": ...}` ou `null`). |
 | `/api/limpar-conversa`    | DELETE | apaga a thread informada via `{"thread_id": ...}`. Retorna `409` se houver consulta em andamento para esse thread. |
 
 As rotas de API são registradas **antes** do mount estático, então

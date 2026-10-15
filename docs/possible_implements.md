@@ -386,9 +386,10 @@ evolução possível — o MVP não exigia build tooling.
 - filtros;
 - histórico da conversa além da sessão;
 - edição assistida, preview das alterações e download do arquivo modificado;
-- visualização das evidências usadas na resposta;
-- streaming da resposta (hoje a API responde de uma vez, e o frontend mostra o
-  loading enquanto espera).
+- visualização das evidências usadas na resposta.
+- ~~streaming da resposta~~ — **implementado**: o backend emite eventos `token`
+  (texto parcial do modelo, coalescido) antes do `result`, e o frontend renderiza
+  o texto progressivamente e substitui pelo markdown final.
 
 ### 7.3 Deploy
 

@@ -1,6 +1,7 @@
 from nlq.agent.agent import create_nlq_agent
 from nlq.agent.metrics import PerfCallbackHandler
 from nlq.paths import load_env
+from nlq.warmup import aquecer_em_segundo_plano
 
 import time
 import json
@@ -78,6 +79,9 @@ def main():
 
     agent, checkpointer = create_nlq_agent()
     console = Console()
+
+    # Pré-carrega schema e registros em segundo plano.
+    aquecer_em_segundo_plano()
 
     config = {
         "configurable": {

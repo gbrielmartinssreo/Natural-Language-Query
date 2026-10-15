@@ -8,6 +8,7 @@ cache são compartilhados: quem os recebe não deve alterá-los.
 from __future__ import annotations
 
 import csv
+import threading
 import warnings
 from pathlib import Path
 from typing import Any
@@ -16,7 +17,7 @@ from openpyxl import load_workbook
 
 from .schema import RegionSchema, WorkbookSchema, build_schema
 
-CACHE_MAX_ENTRIES = 8
+CACHE_MAX_ENTRIES = 16
 
 # (caminho resolvido, mtime em ns, tamanho em bytes)
 CacheKey = tuple[str, int, int]
@@ -30,31 +31,54 @@ class _BoundedCache:
     def __init__(self, max_entries: int) -> None:
         self._max_entries = max_entries
         self._items: dict[CacheKey, Any] = {}
+        self._lock = threading.RLock()
 
     def get(self, key: CacheKey) -> Any | None:
-        return self._items.get(key)
+        with self._lock:
+            return self._items.get(key)
 
     def put(self, key: CacheKey, value: Any) -> None:
-        # Entradas antigas do mesmo arquivo ficam obsoletas.
-        for stale in [
-            k for k in self._items if k[0] == key[0] and k != key
-        ]:
-            del self._items[stale]
+        with self._lock:
+            # Entradas antigas do mesmo arquivo ficam obsoletas.
+            for stale in [
+                k for k in self._items if k[0] == key[0] and k != key
+            ]:
+                del self._items[stale]
 
-        while len(self._items) >= self._max_entries:
-            self._items.pop(next(iter(self._items)))
+            while len(self._items) >= self._max_entries:
+                self._items.pop(next(iter(self._items)))
 
-        self._items[key] = value
+            self._items[key] = value
 
     def clear(self) -> None:
-        self._items.clear()
+        with self._lock:
+            self._items.clear()
 
     def __len__(self) -> int:
-        return len(self._items)
+        with self._lock:
+            return len(self._items)
 
 
 _SCHEMAS = _BoundedCache(CACHE_MAX_ENTRIES)
 _RECORDS = _BoundedCache(CACHE_MAX_ENTRIES)
+
+# Evita que leituras concorrentes do mesmo arquivo (ainda não cacheado)
+# sejam feitas em duplicidade. A granularidade é por arquivo.
+_CACHE_LOCKS: dict[str, threading.Lock] = {}
+_CACHE_LOCKS_GUARD = threading.Lock()
+
+
+def _lock_for(path: Path) -> threading.Lock:
+    chave = str(path)
+
+    with _CACHE_LOCKS_GUARD:
+        lock = _CACHE_LOCKS.get(chave)
+
+        if lock is None:
+            lock = threading.RLock()
+            _CACHE_LOCKS[chave] = lock
+
+        return lock
 
 
 def _file_key(path: Path) -> CacheKey:
@@ -198,8 +222,13 @@ def get_schema(path: str | Path) -> WorkbookSchema:
     schema = _SCHEMAS.get(key)
 
     if schema is None:
-        schema = build_schema(path)
-        _SCHEMAS.put(key, schema)
+        with _lock_for(path):
+            key = _file_key(path)
+            schema = _SCHEMAS.get(key)
+
+            if schema is None:
+                schema = build_schema(path)
+                _SCHEMAS.put(key, schema)
 
     return schema
 
@@ -219,11 +248,16 @@ def load_records(path: str | Path) -> Records:
     records = _RECORDS.get(key)
 
     if records is None:
-        if suffix == ".csv":
-            records = read_csv(path)
-        else:
-            records = read_workbook(path, get_schema(path))
+        with _lock_for(path):
+            key = _file_key(path)
+            records = _RECORDS.get(key)
 
-        _RECORDS.put(key, records)
+            if records is None:
+                if suffix == ".csv":
+                    records = read_csv(path)
+                else:
+                    records = read_workbook(path, get_schema(path))
+
+                _RECORDS.put(key, records)
 
     return records
