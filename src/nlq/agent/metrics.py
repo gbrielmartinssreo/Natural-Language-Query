@@ -20,9 +20,14 @@ from typing import Any
 from langchain_core.callbacks import BaseCallbackHandler
 
 
-def _uso_tokens(response: Any) -> tuple[int | None, int | None, int | None]:
-    """Extrai (entrada, saida, total) de um ``LLMResult`` quando disponível."""
-    entrada = saida = total = None
+def _uso_tokens(
+    response: Any,
+) -> tuple[int | None, int | None, int | None, int | None]:
+    """Extrai (entrada, saida, total, cache_read) de um ``LLMResult``.
+
+    ``cache_read`` é quantos tokens de entrada vieram de cache de prompt.
+    """
+    entrada = saida = total = cache_read = None
 
     llm_output = getattr(response, "llm_output", None) or {}
     uso = llm_output.get("token_usage") or llm_output.get("usage") or {}
@@ -31,6 +36,8 @@ def _uso_tokens(response: Any) -> tuple[int | None, int | None, int | None]:
         entrada = uso.get("prompt_tokens") or uso.get("input_tokens")
         saida = uso.get("completion_tokens") or uso.get("output_tokens")
         total = uso.get("total_tokens")
+        detalhes = uso.get("input_token_details") or {}
+        cache_read = detalhes.get("cache_read")
 
     if total is None:
         for geracoes in getattr(response, "generations", []) or []:
@@ -46,8 +53,10 @@ def _uso_tokens(response: Any) -> tuple[int | None, int | None, int | None]:
                     entrada = meta.get("input_tokens", entrada)
                     saida = meta.get("output_tokens", saida)
                     total = meta.get("total_tokens", total)
+                    detalhes = meta.get("input_token_details") or {}
+                    cache_read = detalhes.get("cache_read", cache_read)
 
-    return entrada, saida, total
+    return entrada, saida, total, cache_read
 
 
 class PerfCallbackHandler(BaseCallbackHandler):
@@ -72,12 +81,13 @@ class PerfCallbackHandler(BaseCallbackHandler):
     def on_llm_end(self, response, **kwargs) -> None:
         run_id = kwargs.get("run_id")
         inicio = self._llm_start.pop(run_id, None)
-        entrada, saida, total = _uso_tokens(response)
+        entrada, saida, total, cache_read = _uso_tokens(response)
         self.llm_calls.append({
             "duracao": perf_counter() - inicio if inicio is not None else None,
             "tokens_entrada": entrada,
             "tokens_saida": saida,
             "tokens_total": total,
+            "cache_read": cache_read,
         })
 
     # -- ferramentas --------------------------------------------------
@@ -110,6 +120,7 @@ class PerfCallbackHandler(BaseCallbackHandler):
         )
         saida = sum(c["tokens_saida"] or 0 for c in self.llm_calls)
         total = sum(c["tokens_total"] or 0 for c in self.llm_calls)
+        cache_read = sum(c.get("cache_read") or 0 for c in self.llm_calls)
 
         return {
             "llm_chamadas": len(self.llm_calls),
@@ -118,6 +129,18 @@ class PerfCallbackHandler(BaseCallbackHandler):
             "tokens_entrada": entrada or None,
             "tokens_saida": saida or None,
             "tokens_total": total or None,
+            "cache_read": cache_read or None,
+            "llm_detalhe": [
+                {
+                    "entrada": c["tokens_entrada"],
+                    "saida": c["tokens_saida"],
+                    "cache_read": c.get("cache_read"),
+                    "duracao": (
+                        round(c["duracao"], 4) if c["duracao"] else None
+                    ),
+                }
+                for c in self.llm_calls
+            ],
             "tool_chamadas": len(self.tool_calls),
             "tool_chars_total": sum(c["chars"] for c in self.tool_calls),
             "tool_detalhe": [
@@ -136,7 +159,7 @@ class PerfCallbackHandler(BaseCallbackHandler):
         r = self.resumo()
         tokens = (
             f"entrada={r['tokens_entrada']} saida={r['tokens_saida']} "
-            f"total={r['tokens_total']}"
+            f"total={r['tokens_total']} cache_read={r['cache_read']}"
             if r["tokens_total"] is not None
             else "não informados pelo provider"
         )
@@ -145,6 +168,16 @@ class PerfCallbackHandler(BaseCallbackHandler):
             f"tempo={r['llm_tempo_total']}s tokens={tokens}",
             flush=True,
         )
+
+        for i, chamada in enumerate(r["llm_detalhe"], start=1):
+            print(
+                f"[PERF]   llm#{i} entrada={chamada['entrada']} "
+                f"saida={chamada['saida']} "
+                f"cache_read={chamada['cache_read']} "
+                f"tempo={chamada['duracao']}s",
+                flush=True,
+            )
+
         print(
             f"[PERF] tools chamadas={r['tool_chamadas']} "
             f"chars={r['tool_chars_total']}",

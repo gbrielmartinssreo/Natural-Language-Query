@@ -920,72 +920,34 @@ def consultar_dados(
     ordem: str = "desc",
 ) -> str:
     """
-    Consulta planilhas CSV/XLSX com Pandas, usando operações tabulares
-    exatas sobre colunas identificadas no arquivo. Não exige cálculos:
-    também localiza registros por condições textuais.
+    Consulta planilhas CSV/XLSX com Pandas (operações tabulares exatas).
 
-    ESCOLHA DA OPERAÇÃO PELO FORMATO DA RESPOSTA:
-    - filtrar: quando o usuário precisa de linhas individuais, com suas
-      colunas e referências, inclusive se várias linhas forem parecidas.
-    - agrupar com agregacao="valores": quando a resposta pede entidades
-      ou combinações distintas, reunindo os diferentes valores associados
-      a cada grupo, SEM repetir linhas equivalentes na resposta da LLM.
-      Escolha agrupar_por com uma ou mais colunas reais da planilha;
-      coluna indica o campo cujos valores distintos serão reunidos.
-      Não invente colunas nem pressuponha nomes ou domínios específicos.
-    - agrupar com agregacao="contagem", "soma", "media", "minimo" ou
-      "maximo": quando o usuário precisa de totais por grupo.
-    - contar, agregar, ordenar, metas e distintos: use conforme a
-      necessidade de contagem, cálculo, ranking, metas ou valores únicos.
+    Operações (escolha pelo formato da resposta):
+    - filtrar: linhas individuais, com colunas e referências.
+    - agrupar com agregacao="valores": valores distintos por grupo, sem
+      repetir linhas equivalentes na resposta.
+    - agrupar com agregacao="contagem"/"soma"/"media"/"minimo"/"maximo":
+      totais por grupo.
+    - contar, agregar, ordenar, metas, distintos: contagem, cálculo,
+      ranking, metas ou valores únicos.
 
-    IMPORTANTE SOBRE CONSOLIDAÇÃO:
-    - Quando o mesmo item aparece em várias linhas e a pergunta pede
-      itens distintos mais valores associados, prefira 'agrupar' em vez
-      de enviar todas as linhas com 'filtrar' para a LLM consolidar.
-    - Se a pergunta exige cada ocorrência, use 'filtrar'. Não aplique
-      deduplicação automaticamente: linhas repetidas podem ser legítimas.
-    - A operação 'agrupar' com 'valores' informa total_registros,
-      total_valores e referências (_refs) agrupadas por aba.
-    - 'valores' preserva os textos originais dos valores retornados,
-      mas há limites: até 50 valores por grupo, e até 2000 caracteres
-      por valor. Observe valores_truncados e qualquer reticência.
-      Não afirme transcrição integral se algum texto estiver cortado.
-    - O limite de até 100 grupos/linhas é indicado por 'truncado'.
-      Nunca apresente resultados parciais como exaustivos.
-
-    FILTROS E ESCOPO:
-    - filtros é uma lista de {coluna, operador, valor}; múltiplos filtros
-      são combinados por AND, tanto em 'filtrar' quanto em 'agrupar'.
-    - 'contem' faz correspondência textual parcial, sem exigir semântica.
-    - Operadores: igual, diferente, maior, maior_igual, menor,
-      menor_igual, contem, nao_contem, vazio, nao_vazio, em.
-    - aba="" consulta todas as abas; em agrupamentos, o alias 'aba'
-      em agrupar_por permite separar resultados por origem.
-    - Use buscar_semantico apenas se os critérios dependerem de
-      significado, sinônimos ou interpretação conceitual; refs limita
-      o Pandas somente aos candidatos recuperados, sem garantir
-      cobertura semântica completa.
-    - Não use create_json para cálculos resolvidos por esta ferramenta.
-
-    EXEMPLOS GENÉRICOS:
-    - Pedidos de cada linha correspondente: operacao="filtrar",
-      filtros=[{"coluna":"Status","operador":"igual","valor":"Ativo"}].
-    - Pedidos de itens únicos com valores associados:
-      operacao="agrupar", agrupar_por="aba, Categoria",
-      coluna="Fornecedor", agregacao="valores", com filtros opcionais.
-      Os nomes das colunas são ilustrativos; consulte o esquema real.
+    Filtros: lista de {coluna, operador, valor}; múltiplos por AND.
+    Operadores: igual, diferente, maior, maior_igual, menor, menor_igual,
+    contem, nao_contem, vazio, nao_vazio, em. 'contem' é parcial.
+    aba="" consulta todas as abas; 'aba'/'eixo' em agrupar_por separa por
+    aba. Limites: até 100 grupos/linhas (sinalizado por 'truncado') e até
+    50 valores por grupo; não apresente resultado parcial como exaustivo.
 
     Args:
         name: Nome do arquivo sem extensão.
-        ext: Extensão: csv ou xlsx.
+        ext: csv ou xlsx.
         operacao: contar, filtrar, agregar, agrupar, ordenar, metas,
             distintos.
-        aba: Aba específica. Vazio consulta todas as abas.
+        aba: Aba específica; vazio consulta todas.
         coluna: Coluna-alvo de agregação ou valores reunidos por grupo.
         agregacao: contagem, soma, media, minimo, maximo; no agrupar,
-            também 'valores' para consolidação sem cálculo numérico.
-        agrupar_por: Uma ou mais colunas separadas por vírgula;
-            'aba'/'eixo' representa a aba de origem.
+            também 'valores'.
+        agrupar_por: Uma ou mais colunas separadas por vírgula.
         filtros: Lista de {coluna, operador, valor} ou string JSON.
         colunas: Campos projetados em filtrar/ordenar, separados por
             vírgula; 'aba' expõe a origem e _origem é sempre devolvido.
@@ -1052,7 +1014,7 @@ def consultar_dados(
             status = "ok"
             return resultado
 
-        resultado = _executar(
+        dados = _executar(
             escopo,
             operacao,
             filtros_validados,
@@ -1065,20 +1027,20 @@ def consultar_dados(
             ordem,
         )
 
-        resultado["arquivo"] = f"{name}.{ext}"
+        dados["arquivo"] = f"{name}.{ext}"
 
         if aba and aba.strip():
-            resultado["aba"] = aba
+            dados["aba"] = aba
 
         if refs_validadas:
-            resultado["refs"] = {
+            dados["refs"] = {
                 "recebidas": len(refs_validadas),
                 "unicas": len(refs_validadas),
                 "registros_no_escopo": total_antes,
                 "registros_encontrados": len(escopo),
             }
 
-        resultado = json.dumps(resultado, ensure_ascii=False, separators=(",", ":"))
+        resultado = json.dumps(dados, ensure_ascii=False, separators=(",", ":"))
         status = "ok"
         return resultado
     finally:

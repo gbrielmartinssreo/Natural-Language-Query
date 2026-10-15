@@ -12,7 +12,7 @@ O agente mantém **memória da sessão**: o histórico de turnos é gravado por
 um checkpointer do LangGraph e devolvido ao LLM a cada pergunta.
 
 O mesmo agente é exposto por **duas interfaces**: a CLI (`src/nlq/main.py`) e uma
-**API FastAPI** (`src/nlq/api.py`) com **streaming NDJSON**. Ambas compartilham a sessão em memória —
+**API FastAPI** (`src/nlq/api.py`) com **streaming NDJSON** (incluindo tokens parciais da resposta). Ambas compartilham a sessão em memória —
 mesmo checkpointer; a API aceita `thread_id` por requisição.
 
 ```mermaid
@@ -57,18 +57,18 @@ semi-estruturadas ou corporativas exigem interpretação que ainda não existe
 | Componente            | Onde                                | Papel                                                            | Estado       |
 |-----------------------|-------------------------------------|------------------------------------------------------------------|--------------|
 | Interface (CLI)       | `src/nlq/main.py`                   | Recebe a pergunta e imprime a resposta (`rich`)                  | **Atual**    |
-| API (FastAPI)         | `src/nlq/api.py`                    | Expõe agente via streaming NDJSON: `POST /api/chat`, `DELETE /api/limpar-conversa`, `GET /health`. Fila + keep-alive + cancelamento cooperativo | **Atual**    |
-| Agente (deepagents)   | `src/nlq/agent/agent.py`            | Orquestra o ciclo LLM ↔ ferramentas; usa `FilesystemBackend` para skills e `REGRAS_DE_CONSULTA` | **Atual**    |
-| LLM (Groq/OpenRouter) | `src/nlq/agent/agent.py`            | Decide estratégia (RAG-first), interpreta e redige resposta      | **Atual**    |
+| API (FastAPI)         | `src/nlq/api.py`                    | Expõe agente via streaming NDJSON (`status`, `token`, `result`, `error`, `ping`): `POST /api/chat`, `DELETE /api/limpar-conversa`, `GET /health`. Fila + keep-alive + cancelamento cooperativo | **Atual**    |
+| Agente (langchain)    | `src/nlq/agent/agent.py`            | Orquestra o ciclo LLM ↔ ferramentas via `create_agent`; middleware (`CacheDeChamadas`, `ToolCallLimitMiddleware`, `TratarErroDeTool`) | **Atual**    |
+| LLM (Groq/OpenRouter) | `src/nlq/agent/agent.py`            | Decide estratégia, interpreta e redige resposta; `session_id` p/ cache de prompt | **Atual**    |
 | Prompt de sistema     | `src/nlq/agent/prompts/`            | `system_base.md` + `specific_role.md` + `REGRAS_DE_CONSULTA`     | **Atual**    |
-| Tools                 | `src/nlq/tools/`                    | `create_json`, `lista_arquivos`, `consultar_schema`, `buscar_semantico`, `goat` | **Atual**    |
+| Tools                 | `src/nlq/tools/`                    | `create_json`, `goat`, `lista_arquivos`, `consultar_schema`, `buscar_semantico`, `consultar_dados` | **Atual**    |
 | Schema (xldetect)     | `src/nlq/data/schema.py`            | Detecta regiões tabulares, cabeçalhos, normaliza schema         | **Atual**    |
 | Loader + Cache        | `src/nlq/data/loader.py`            | Carrega CSV/XLSX com cache de schema e registros (invalida por mtime/tamanho) | **Atual**    |
 | Embeddings/RAG        | `src/nlq/data/embeddings.py`, `semantic_search.py`, `documents.py` | Gera embeddings (OpenAI), indexa por fingerprint e busca semântica | **Atual**    |
 | Parser (CSV)          | `src/nlq/data/loader.py`            | `csv.DictReader` com fallback de codificação                     | **Atual**    |
 | Parser (XLSX)         | `src/nlq/data/loader.py`            | Lê via `openpyxl` guiado por schema (regiões), trata mesclagens verticais | **Atual**    |
 | Memória de sessão     | `src/nlq/agent/agent.py`            | `InMemorySaver` (LangGraph), compartilhada CLI/API               | **Atual**    |
-| Resposta final        | `src/nlq/main.py` e `src/nlq/api.py` | CLI (Painel `rich`) ou streaming NDJSON (`result`)               | **Atual**    |
+| Resposta final        | `src/nlq/main.py` e `src/nlq/api.py` | CLI (Painel `rich`) ou streaming NDJSON (`token` parcial + `result`) | **Atual**    |
 | Interface (Web)       | `frontend/`                          | Frontend estático com consumo de stream NDJSON, cancelamento, keep-alive, tema | **Em andamento** ([#19](https://github.com/gbrielmartinssreo/Natural-Language-Query/issues/19)) |
 | Ambientes e deploy    | —                                   | `develop` (teste) e `main` (produção), com URL fixa cada          | **Planejado** ([#16](https://github.com/gbrielmartinssreo/Natural-Language-Query/issues/16)–[#18](https://github.com/gbrielmartinssreo/Natural-Language-Query/issues/18)) |
 

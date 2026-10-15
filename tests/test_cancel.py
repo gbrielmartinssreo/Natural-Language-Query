@@ -20,7 +20,7 @@ import unittest
 from operator import add
 from typing import Annotated, TypedDict
 
-from langchain_core.messages import ToolMessage
+from langchain_core.messages import AIMessageChunk, ToolMessage
 from langgraph.errors import GraphDrained
 from langgraph.graph import END, START, StateGraph
 from langgraph.runtime import RunControl
@@ -113,6 +113,103 @@ class TestExecutarAgente(unittest.TestCase):
             )
 
         self.assertIn("erro", [tipo for tipo, _ in eventos])
+
+
+class _FakeStreamAgent:
+    """Agente falso que reproduz itens no formato do modo múltiplo."""
+
+    def __init__(self, itens):
+        self.itens = itens
+        self.recebeu_stream_mode = None
+        self.recebeu_control = False
+
+    def stream(self, entrada, config=None, stream_mode=None, control=None):
+        self.recebeu_stream_mode = stream_mode
+        self.recebeu_control = control is not None
+
+        for item in self.itens:
+            if control is not None and control.drain_requested:
+                raise GraphDrained("teste")
+
+            yield item
+
+
+def _chunk(content, tool_call_chunks=None):
+    """Chunk de IA compatível com o modo "messages"."""
+    return AIMessageChunk(
+        content=content,
+        tool_call_chunks=tool_call_chunks or [],
+    )
+
+
+class TestStreamingTokens(unittest.TestCase):
+    def test_streaming_publica_tokens_coalescidos_e_fim(self):
+        agente = _FakeStreamAgent([
+            ("messages", (_chunk("Olá "), {})),
+            ("messages", (_chunk("mundo"), {})),
+            (
+                "messages",
+                (
+                    _chunk(
+                        "",
+                        tool_call_chunks=[
+                            {"name": "x", "args": "", "id": "1", "index": 0}
+                        ],
+                    ),
+                    {},
+                ),
+            ),
+            ("values", {"messages": []}),
+        ])
+
+        eventos = []
+
+        api._executar_agente(
+            agente,
+            {},
+            {},
+            eventos.append,
+            threading.Event(),
+            RunControl(),
+        )
+
+        self.assertEqual(
+            agente.recebeu_stream_mode,
+            ["messages", "values"],
+        )
+
+        texto = "".join(
+            payload for tipo, payload in eventos if tipo == "token"
+        )
+
+        self.assertEqual(texto, "Olá mundo")
+        self.assertEqual(eventos[-1][0], "fim")
+
+    def test_cancelamento_nao_publica_tokens_tardios(self):
+        agente = _FakeStreamAgent([
+            ("messages", (_chunk("a"), {})),
+            ("messages", (_chunk("b"), {})),
+        ])
+
+        cancelado = threading.Event()
+        eventos = []
+
+        def publicar(item):
+            eventos.append(item)
+
+            if item[0] == "token":
+                cancelado.set()
+
+        api._executar_agente(
+            agente,
+            {},
+            {},
+            publicar,
+            cancelado,
+            RunControl(),
+        )
+
+        self.assertNotIn("fim", [tipo for tipo, _ in eventos])
 
 
 class _State(TypedDict):
@@ -233,6 +330,59 @@ class TestHelpers(unittest.TestCase):
             api._status_do_estado({"messages": [classe_texto()]}),
             "consultando modelo",
         )
+
+    def test_separar_evento(self):
+        self.assertEqual(
+            api._separar_evento(("messages", ("c", {}))),
+            ("messages", ("c", {})),
+        )
+
+        estado = {"messages": []}
+
+        self.assertEqual(
+            api._separar_evento(estado),
+            ("values", estado),
+        )
+
+    def test_token_do_chunk(self):
+        self.assertEqual(
+            api._token_do_chunk((_chunk("abc"), {})),
+            "abc",
+        )
+
+        self.assertEqual(
+            api._token_do_chunk(
+                (
+                    _chunk(
+                        "abc",
+                        tool_call_chunks=[
+                            {"name": "x", "args": "", "id": "1", "index": 0}
+                        ],
+                    ),
+                    {},
+                )
+            ),
+            "",
+        )
+
+        self.assertEqual(
+            api._token_do_chunk(
+                (_chunk([{"type": "text", "text": "olá "},
+                          {"type": "text", "text": "mundo"}]), {})
+            ),
+            "olá mundo",
+        )
+
+        # Mensagem de ferramenta não é transmitida como token.
+        self.assertEqual(
+            api._token_do_chunk(
+                (ToolMessage(content="resultado", tool_call_id="1"), {})
+            ),
+            "",
+        )
+
+        # Payload fora do formato esperado não quebra.
+        self.assertEqual(api._token_do_chunk("solto"), "")
 
     def test_texto_final(self):
         self.assertEqual(

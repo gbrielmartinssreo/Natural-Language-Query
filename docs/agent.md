@@ -12,53 +12,59 @@ resposta — não há etapas rigidamente separadas no código.
 
 ## 2. Implementação atual
 
-Definido em `create_nlq_agent()` — `src/nlq/agent/agent.py`. Usa `deepagents.create_deep_agent` com `FilesystemBackend` para carregar skills do disco. Há **dois modelos candidatos**, e a escolha acontece em tempo de execução com logs de inicialização:
+Definido em `create_nlq_agent()` — `src/nlq/agent/agent.py`. Usa `langchain.agents.create_agent`, com `InMemorySaver` e middleware próprio. Há **dois provedores candidatos** e a escolha acontece em tempo de execução com logs de inicialização:
 
 ```python
 checkpointer = InMemorySaver()
 
-model1 = init_chat_model(
+model_openrouter = init_chat_model(
+    "openrouter:deepseek/deepseek-v4-flash-0731",
+    temperature=0.1,
+    timeout=60000,
+    max_tokens=2500,
+    reasoning={"effort": "none"},
+    session_id=...,                 # roteamento fixo p/ cache de prompt
+)
+
+model_groq = init_chat_model(
     "openai/gpt-oss-120b",
     model_provider="groq",
     temperature=0.1,
-    timeout=60000,
-    max_tokens=7000,
+    timeout=60,
+    max_tokens=2500,
 )
-
-
-model2 = init_chat_model(
-    "openrouter:qwen/qwen3-30b-a3b-instruct-2507",
-    temperature=0.1,
-    timeout=60000,
-    max_tokens=10000,
-)
-
 
 if os.getenv("API_SELECT") == "groq" or not check_openrouter_key():
-    model = model1
-elif os.getenv("API_SELECT") == "openrouter" or check_openrouter_key():
-    model = model2
+    model = model_groq
+else:
+    model = model_openrouter
 
-tools = [create_json, lista_arquivos]
+tools = [
+    create_json, goat, lista_arquivos,
+    consultar_schema, buscar_semantico, consultar_dados,
+]
 
-return (
-    create_agent(
-        model=model,
-        tools=tools,
-        checkpointer=checkpointer,
-        system_prompt=(
-            load_prompt("prompts/system_base.md")
-            + "\n\n"
-            + load_prompt("prompts/specific_role.md")
-        ),
+agent = create_agent(
+    model=model,
+    tools=tools,
+    checkpointer=checkpointer,
+    system_prompt=(
+        load_prompt("system_base.md")
+        + "\n\n" + load_prompt("specific_role.md")
+        + "\n\n" + REGRAS_DE_CONSULTA
     ),
-    checkpointer,
+    middleware=[
+        CacheDeChamadas(),
+        ToolCallLimitMiddleware(run_limit=10, exit_behavior="continue"),
+        TratarErroDeTool(),
+    ],
 )
+
+return agent, checkpointer
 ```
 
-> **Atenção** — os dois modelos são construídos incondicionalmente, antes da
-> escolha. Sem `GROQ_API_KEY`, a construção do modelo Groq levanta `GroqError` e a
-> CLI não inicia, mesmo com `API_SELECT=openrouter`.
+> A variável `NLQ_MODEL` sobrepõe o modelo escolhido. `NLQ_SESSION_ID` e
+> `NLQ_PIN_PROVIDER`/`NLQ_PROVIDER` controlam roteamento e cache no OpenRouter.
 
 A função devolve uma **tupla `(agente, checkpointer)`**. Os dois consumidores
 desempacotam o retorno: `main.py` (CLI) e `api.py` (API FastAPI) — este último
@@ -100,18 +106,39 @@ A decisão é feita por `usar_groq = (API_SELECT=='groq' or not check_openrouter
 
 | Item               | Valor atual                                          |
 |--------------------|------------------------------------------------------|
-| Framework          | `deepagents.create_deep_agent` (LangGraph subjacente) |
+| Framework          | `langchain.agents.create_agent` (LangGraph subjacente) |
 | Provider 1         | Groq (`init_chat_model`, `model_provider`)          |
 | Modelo 1           | `openai/gpt-oss-120b`                                |
 | Provider 2         | OpenRouter (`init_chat_model`)                       |
-| Modelo 2           | `qwen/qwen3-30b-a3b-instruct-2507`                   |
+| Modelo 2           | `deepseek/deepseek-v4-flash-0731` (`reasoning=effort none`) |
 | `temperature`      | `0.1` (respostas determinísticas)                    |
 | `timeout`          | `60` s (Groq) / `60000` ms (OpenRouter) — ~60 s por chamada |
-| `max_tokens`       | `7000` (Groq) / `10000` (OpenRouter)                 |
-| Ferramentas        | `create_json`, `lista_arquivos`, `consultar_schema`, `buscar_semantico`, `goat` |
+| `max_tokens`       | `2500` (ambos)                                       |
+| Ferramentas        | `create_json`, `goat`, `lista_arquivos`, `consultar_schema`, `buscar_semantico`, `consultar_dados` |
+| Middleware         | `CacheDeChamadas`, `ToolCallLimitMiddleware(10)`, `TratarErroDeTool` |
 | Memória            | `InMemorySaver` (LangGraph)                          |
 | Prompt de sistema  | `system_base.md` + `specific_role.md` + `REGRAS_DE_CONSULTA` |
-| Skills             | carregadas via `FilesystemBackend` (pasta `skills/`, montada em `/`) |
+| Skills             | pasta `skills/` (metadados no disco; roteamento pelas descrições das ferramentas) |
+| Override de modelo | `NLQ_MODEL`                                          |
+| Cache/roteamento   | `NLQ_SESSION_ID`, `NLQ_PIN_PROVIDER`, `NLQ_PROVIDER` |
+
+### Desempenho (otimizações)
+
+O gargalo de tempo é o **LLM** (tokens de entrada e número de chamadas), não o
+Pandas. Medidas aplicadas:
+
+- **Prompt enxuto** — `REGRAS_DE_CONSULTA` consolidado (uma fonte canônica de
+  roteamento) e descrições de ferramentas reduzidas; o payload fixo por chamada
+  caiu de ~25.900 para ~13.900 caracteres.
+- **Cache de prompt** — `session_id` estável faz o OpenRouter usar roteamento
+  fixo, aumentando `cache_read` entre as chamadas.
+- **Saída limitada** — `max_tokens=2500` evita respostas que estouram o teto
+  (antes: uma geração de 10.000 tokens levava ~65 s).
+- **Anti-loop** — `CacheDeChamadas` devolve resultados repetidos e
+  `ToolCallLimitMiddleware(10)` impede exploração sem limites.
+- **Warm-up** — esquema/registros (e índice semântico) carregados em segundo
+  plano (`nlq/warmup.py`).
+
 
 ### Interface (CLI)
 
@@ -153,13 +180,13 @@ em `/docs`.
 |------------------------|--------|----------------------------------------------------------------------|
 | `/`                    | GET    | Serve o frontend estático (`frontend/index.html` — `StaticFiles(html=True)`) |
 | `/health`              | GET    | `{"status": "ok"}`                                                   |
-| `/api/chat`            | POST   | Streaming NDJSON. Corpo `{"message": str, "thread_id": str}`. Eventos: `status` (processando/executando ferramenta/consultando modelo), `result` (`response`, `planilha`), `error`, `ping`. Usa fila + keep-alive (10s) + cancelamento cooperativo. |
+| `/api/chat`            | POST   | Streaming NDJSON. Corpo `{"message": str, "thread_id": str}`. Eventos: `status` (processando/executando ferramenta/consultando modelo), `token` (texto parcial do modelo, coalescido em lotes), `result` (`response`, `planilha`), `error`, `ping`. Usa fila + keep-alive (10s) + cancelamento cooperativo. |
 | `/api/limpar-conversa` | DELETE | Corpo `{"thread_id": str}`. Bloqueia se consulta ativa para thread (`409`). Senão `checkpointer.delete_thread(thread_id)`. |
 
 As rotas de API são registradas **antes** do mount estático em `/`, então
 `/health`, `/api/*` e `/docs` têm precedência sobre o frontend.
 
-`/api/chat` monta `config={"configurable":{"thread_id": request.thread_id}}` e invoca agente via `agente.stream` em thread separada, publicando eventos em fila. O campo `planilha` em `result` é extraído via `_ultima_planilha()` (última chamada `create_json`). API e CLI compartilham o mesmo checkpointer (mesma memória entre execuções no mesmo processo).
+`/api/chat` monta `config={"configurable":{"thread_id": request.thread_id}}` e invoca agente via `agente.stream` com `stream_mode=["messages","values"]` em thread separada, publicando eventos em fila; apenas tokens de `AIMessageChunk` do modelo viram eventos `token` (mensagens de ferramenta e argumentos de tool-call são ignorados). O campo `planilha` em `result` é extraído via `_ultima_planilha()` (última chamada `create_json`). API e CLI compartilham o mesmo checkpointer (mesma memória entre execuções no mesmo processo).
 
 ## 3. Configuração do modelo
 
@@ -289,16 +316,16 @@ Montado por concatenação de arquivos Markdown em `src/nlq/agent/prompts/` mais
 
 - `system_base.md` — regras de funcionamento do agente (uso de ferramentas, fidelidade, continuidade).
 - `specific_role.md` — define escopo do domínio (pode ser editado livremente).
-- `REGRAS_DE_CONSULTA` (constante em `agent.py`) — diretrizes operacionais: priorizar `buscar_semantico` para conteúdo, usar `consultar_schema` para estrutura, usar `create_json` só quando estritamente necessário (com bloqueio por tamanho), checar aba/origem dos resultados, não calcular totais só com RAG, cobertura parcial com "Nos registros consultados...".
+- `REGRAS_DE_CONSULTA` (constante em `agent.py`) — política operacional concisa: economia de etapas (planejar, paralelizar, não repetir consultas, não fazer rodadas de conferência), roteamento por objetivo (schema × dados × semântica × arquivos × extração), integridade/consolidação dos dados e resposta concisa sem passos intermediários.
 
-O prompt completo é passado a `create_deep_agent`. Skills são carregadas via `FilesystemBackend` (montadas em `/` a partir de `skills_dir()`).
+O prompt completo é passado a `create_agent`. Os `SKILL.md` permanecem no disco como metadados, mas o roteamento é dado pelas descrições das próprias ferramentas.
 
 ## 7. Dívidas técnicas conhecidas
 
 ### Payload e contexto
 
 - **`indent=2` no JSON** aumenta o payload; XLSX multi-aba pode se aproximar do
-  `max_tokens` (7000 Groq / 10000 OpenRouter).
+  `max_tokens` (2500 em ambos os provedores).
 - **Ausência de dado não sinalizada** pela tool (ver §4).
 - **Falha de leitura sem tratamento** — erros sobem crus para o LLM (ver §4).
 

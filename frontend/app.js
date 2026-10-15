@@ -303,8 +303,35 @@ async function enviar(texto) {
 
     let buffer = "";
     let respostaFinal = "";
+    let respostaStreaming = "";
     let recebeuResultado = false;
     let falha = null;
+
+    //
+    // A renderização a cada token é cara (markdown/scroll).
+    // Enquanto os tokens chegam, mostramos texto simples e
+    // agendamos no máximo um repaint por frame.
+    //
+    let recebendoTokens = false;
+    let renderPendente = false;
+
+    function agendarRenderStreaming() {
+      if (renderPendente) {
+        return;
+      }
+
+      renderPendente = true;
+
+      requestAnimationFrame(() => {
+        renderPendente = false;
+
+        bolha.textContent =
+          respostaStreaming;
+
+        el.scroll.scrollTop =
+          el.scroll.scrollHeight;
+      });
+    }
 
     function processarEvento(dados) {
       //
@@ -319,7 +346,27 @@ async function enviar(texto) {
         return;
       }
 
+      if (dados.type === "token") {
+        //
+        // A partir do primeiro token, a bolha deixa de
+        // mostrar status e passa a exibir o texto parcial.
+        //
+        recebendoTokens = true;
+        respostaStreaming += dados.content || "";
+
+        agendarRenderStreaming();
+
+        return;
+      }
+
       if (dados.type === "status") {
+        //
+        // Não sobrescreve o texto que já está em streaming.
+        //
+        if (recebendoTokens) {
+          return;
+        }
+
         const conteudo = (
           dados.content || "processando"
         ).trim();
