@@ -2,6 +2,7 @@
 const API_URL = "";
 const ROTA_CHAT = "/api/chat";
 const ROTA_LIMPAR = "/api/limpar-conversa";
+const ROTA_LIMPAR_CACHE = "/api/limpar-cache";
 const ROTA_STATUS = "/health";
 
 const SUGESTOES = [
@@ -26,6 +27,7 @@ const el = {
   planilhaChip: $("planilhaChip"),
   planilhaNome: $("planilhaNome"),
   clearHistory: $("clearHistory"),
+  clearCache: $("clearCache"),
   themeToggle: $("themeToggle"),
   sidebarToggle: $("sidebarToggle"),
   backdrop: $("backdrop"),
@@ -303,8 +305,98 @@ async function enviar(texto) {
 
     let buffer = "";
     let respostaFinal = "";
+    let respostaStreaming = "";
     let recebeuResultado = false;
     let falha = null;
+
+    //
+    // A renderização a cada token é cara (markdown/scroll).
+    // Enquanto os tokens chegam, mostramos texto simples e
+    // agendamos no máximo um repaint por frame.
+    //
+    let recebendoTokens = false;
+    let renderPendente = false;
+
+    //
+    // O raciocínio do modelo chega em canal separado
+    // ("thinking") e é exibido num bloco próprio acima da
+    // resposta, sem se misturar com o texto final.
+    //
+    let pensamentoStreaming = "";
+    let blocoPensamento = null;
+    let corpoPensamento = null;
+    let pensamentoPendente = false;
+
+    function agendarRenderStreaming() {
+      if (renderPendente) {
+        return;
+      }
+
+      renderPendente = true;
+
+      requestAnimationFrame(() => {
+        renderPendente = false;
+
+        //
+        // Renderiza markdown já durante o stream (não
+        // texto cru), para que cabeçalhos, listas e
+        // negrito apareçam formatados enquanto a resposta
+        // chega, e não apenas no evento final.
+        //
+        bolha.innerHTML =
+          textoSeguro(respostaStreaming);
+
+        el.scroll.scrollTop =
+          el.scroll.scrollHeight;
+      });
+    }
+
+    function garantirBlocoPensamento() {
+      if (blocoPensamento) {
+        return;
+      }
+
+      const msg = bolha.closest(".msg");
+
+      blocoPensamento =
+        document.createElement("details");
+      blocoPensamento.className = "thinking";
+
+      const resumo =
+        document.createElement("summary");
+      resumo.textContent = "Raciocínio";
+
+      corpoPensamento =
+        document.createElement("div");
+      corpoPensamento.className = "thinking-body";
+
+      blocoPensamento.appendChild(resumo);
+      blocoPensamento.appendChild(corpoPensamento);
+
+      msg.insertBefore(
+        blocoPensamento,
+        bolha
+      );
+    }
+
+    function agendarRenderPensamento() {
+      if (pensamentoPendente) {
+        return;
+      }
+
+      pensamentoPendente = true;
+
+      requestAnimationFrame(() => {
+        pensamentoPendente = false;
+
+        if (!corpoPensamento) {
+          return;
+        }
+
+        corpoPensamento.innerHTML =
+          textoSeguro(pensamentoStreaming);
+      });
+    }
 
     function processarEvento(dados) {
       //
@@ -319,7 +411,42 @@ async function enviar(texto) {
         return;
       }
 
+      if (dados.type === "thinking") {
+        //
+        // Raciocínio do modelo em canal separado: não entra
+        // na resposta, fica num bloco à parte e dobável.
+        //
+        pensamentoStreaming += dados.content || "";
+
+        garantirBlocoPensamento();
+        agendarRenderPensamento();
+
+        return;
+      }
+
+      if (dados.type === "token") {
+        //
+        // A partir do primeiro token, a bolha deixa de
+        // mostrar status e passa a exibir o texto parcial.
+        //
+        recebendoTokens = true;
+        respostaStreaming += dados.content || "";
+
+        bolha.classList.add("streaming");
+
+        agendarRenderStreaming();
+
+        return;
+      }
+
       if (dados.type === "status") {
+        //
+        // Não sobrescreve o texto que já está em streaming.
+        //
+        if (recebendoTokens) {
+          return;
+        }
+
         const conteudo = (
           dados.content || "processando"
         ).trim();
@@ -339,7 +466,15 @@ async function enviar(texto) {
 
       if (dados.type === "result") {
         recebeuResultado = true;
-        respostaFinal = dados.response || "";
+
+        //
+        // Se o evento final vier sem resposta, mantém o
+        // que já foi transmitido em vez de esvaziar a bolha.
+        //
+        respostaFinal =
+          dados.response || respostaStreaming;
+
+        bolha.classList.remove("streaming");
 
         bolha.innerHTML = textoSeguro(
           respostaFinal
@@ -436,6 +571,8 @@ async function enviar(texto) {
 
   } catch (erro) {
     const msg = bolha.closest(".msg");
+
+    bolha.classList.remove("streaming");
 
     if (erro && erro.name === "AbortError") {
       //
@@ -556,6 +693,62 @@ async function limparHistorico() {
 }
 
 
+// ====== LIMPAR CACHES ======
+async function limparCaches() {
+  if (
+    !confirm(
+      "Limpar os caches em memória e em disco? " +
+        "A próxima consulta vai reconstruir o índice semântico."
+    )
+  ) {
+    return;
+  }
+
+  try {
+    const r = await fetch(
+      API_URL + ROTA_LIMPAR_CACHE,
+      {
+        method: "DELETE",
+        headers: {
+          "Content-Type": "application/json",
+        },
+      }
+    );
+
+    if (!r.ok) {
+      if (r.status === 409) {
+        throw new Error(
+          "Há uma consulta em andamento. " +
+            "Interrompa-a antes de limpar os caches."
+        );
+      }
+
+      throw new Error(
+        "Erro " + r.status
+      );
+    }
+
+    const dados = await r.json();
+
+    alert(
+      "Caches limpos: " +
+        dados.dataframes_ram +
+        " aba(s) em RAM, " +
+        dados.indice_ram +
+        " índice(s) semântico(s) e " +
+        dados.arquivos_disco +
+        " arquivo(s) em disco."
+    );
+
+  } catch (erro) {
+    alert(
+      "Não consegui limpar os caches: " +
+      erro.message
+    );
+  }
+}
+
+
 // ====== TEMA ======
 function temaAtual() {
   const salvo =
@@ -657,6 +850,12 @@ el.stopBtn.addEventListener(
 el.clearHistory.addEventListener(
   "click",
   limparHistorico
+);
+
+
+el.clearCache.addEventListener(
+  "click",
+  limparCaches
 );
 
 

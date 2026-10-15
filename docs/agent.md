@@ -12,54 +12,61 @@ resposta — não há etapas rigidamente separadas no código.
 
 ## 2. Implementação atual
 
-Definido em `create_nlq_agent()` — `src/nlq/agent/agent.py`. Há **dois modelos
-candidatos**, e a escolha acontece em tempo de execução:
+Definido em `create_nlq_agent()` — `src/nlq/agent/agent.py`. Usa `langchain.agents.create_agent`, com `InMemorySaver` e middleware próprio. Há **dois provedores candidatos** e a escolha acontece em tempo de execução com logs de inicialização:
 
 ```python
 checkpointer = InMemorySaver()
+max_tokens = int(os.getenv("NLQ_MAX_TOKENS", "5000"))
 
-model1 = init_chat_model(
+model_openrouter = init_chat_model(
+    "openrouter:deepseek/deepseek-v4-flash-0731",
+    temperature=0.1,
+    timeout=60000,
+    max_tokens=max_tokens,
+    session_id=...,                 # roteamento fixo p/ cache de prompt
+    # raciocínio separado por padrão (NLQ_REASONING=separate):
+    # vai para additional_kwargs["reasoning_content"] e NÃO polui o content
+)
+
+model_groq = init_chat_model(
     "openai/gpt-oss-120b",
     model_provider="groq",
     temperature=0.1,
-    timeout=60000,
-    max_tokens=7000,
+    timeout=60,
+    max_tokens=max_tokens,
 )
-
-
-model2 = init_chat_model(
-    "openrouter:qwen/qwen3-30b-a3b-instruct-2507",
-    temperature=0.1,
-    timeout=60000,
-    max_tokens=10000,
-)
-
 
 if os.getenv("API_SELECT") == "groq" or not check_openrouter_key():
-    model = model1
-elif os.getenv("API_SELECT") == "openrouter" or check_openrouter_key():
-    model = model2
+    model = model_groq
+else:
+    model = model_openrouter
 
-tools = [create_json, lista_arquivos]
+tools = [
+    create_json, goat, lista_arquivos,
+    consultar_schema, buscar_semantico, consultar_dados,
+]
 
-return (
-    create_agent(
-        model=model,
-        tools=tools,
-        checkpointer=checkpointer,
-        system_prompt=(
-            load_prompt("prompts/system_base.md")
-            + "\n\n"
-            + load_prompt("prompts/specific_role.md")
-        ),
+agent = create_agent(
+    model=model,
+    tools=tools,
+    checkpointer=checkpointer,
+    system_prompt=(
+        load_prompt("system_base.md")
+        + "\n\n" + load_prompt("specific_role.md")
+        + "\n\n" + REGRAS_DE_CONSULTA
     ),
-    checkpointer,
+    middleware=[
+        CacheDeChamadas(),
+        ToolCallLimitMiddleware(run_limit=10, exit_behavior="continue"),
+        TratarErroDeTool(),
+    ],
 )
+
+return agent, checkpointer
 ```
 
-> **Atenção** — os dois modelos são construídos incondicionalmente, antes da
-> escolha. Sem `GROQ_API_KEY`, a construção do modelo Groq levanta `GroqError` e a
-> CLI não inicia, mesmo com `API_SELECT=openrouter`.
+> A variável `NLQ_MODEL` sobrepõe o modelo escolhido. `NLQ_SESSION_ID` e
+> `NLQ_PIN_PROVIDER`/`NLQ_PROVIDER` controlam roteamento e cache no OpenRouter.
 
 A função devolve uma **tupla `(agente, checkpointer)`**. Os dois consumidores
 desempacotam o retorno: `main.py` (CLI) e `api.py` (API FastAPI) — este último
@@ -95,37 +102,48 @@ Consequências:
 
 ### Seleção de modelo
 
-A variável `API_SELECT` (`.env`) determina o provider:
+A decisão é feita por `usar_groq = (API_SELECT=='groq' or not check_openrouter_key())`. Em caso positivo usa Groq (`openai/gpt-oss-120b`), senão OpenRouter (`qwen/qwen3-30b-a3b-instruct-2507`). São emitidos logs `[MODELO] ...` na inicialização.
 
-| `API_SELECT`  | Resultado                                                        |
-|----------------|------------------------------------------------------------------|
-| `groq`         | Groq / `openai/gpt-oss-120b` — sempre                            |
-| `openrouter`   | OpenRouter / `qwen/qwen3-30b-a3b-instruct-2507`                  |
-| ausente        | Groq se `check_openrouter_key()` falhar; caso contrário, OpenRouter |
-| qualquer outro | `UnboundLocalError` — ver [bug conhecido](#seleção-de-modelo)     |
-
-`check_openrouter_key()` chama `GET https://openrouter.ai/api/v1/key` com a
-chave do `.env` e devolve `True` apenas em HTTP 200; qualquer
-`requests.RequestException` (incluindo timeout de 5 s) devolve `False`.
-
-> **Bug conhecido** — se `API_SELECT` não for `groq` nem `openrouter` **e**
-> `check_openrouter_key()` retornar `True`, nenhum `if` casa e `model` nunca é
-> atribuído, resultando em `UnboundLocalError`. Na prática só aparece com um
-> valor inesperado em `API_SELECT`; a correção é um `else` explícito.
+`check_openrouter_key()` chama `GET https://openrouter.ai/api/v1/key` com a chave do `.env` e devolve `True` apenas em HTTP 200; qualquer `requests.RequestException` devolve `False`.
 
 | Item               | Valor atual                                          |
 |--------------------|------------------------------------------------------|
-| Framework          | LangChain (`create_agent`)                           |
+| Framework          | `langchain.agents.create_agent` (LangGraph subjacente) |
 | Provider 1         | Groq (`init_chat_model`, `model_provider`)          |
 | Modelo 1           | `openai/gpt-oss-120b`                                |
 | Provider 2         | OpenRouter (`init_chat_model`)                       |
-| Modelo 2           | `qwen/qwen3-30b-a3b-instruct-2507`                   |
+| Modelo 2           | `deepseek/deepseek-v4-flash-0731` (raciocínio em canal separado) |
 | `temperature`      | `0.1` (respostas determinísticas)                    |
 | `timeout`          | `60` s (Groq) / `60000` ms (OpenRouter) — ~60 s por chamada |
-| `max_tokens`       | `7000` (Groq) / `10000` (OpenRouter)                 |
-| Ferramentas        | `create_json`, `lista_arquivos`                      |
-| Memória            | `InMemorySaver` (LangGraph), `thread_id="default"`   |
-| Prompt de sistema  | `system_base.md` + `specific_role.md`                |
+| `max_tokens`       | `5000` (padrão; `NLQ_MAX_TOKENS`)                    |
+| Ferramentas        | `create_json`, `goat`, `lista_arquivos`, `consultar_schema`, `buscar_semantico`, `consultar_dados` |
+| Middleware         | `CacheDeChamadas`, `ContextEditingMiddleware`, `ToolCallLimitMiddleware(25)`, `TratarErroDeTool` |
+| Memória            | `InMemorySaver` (LangGraph)                          |
+| Prompt de sistema  | `system_base.md` + `specific_role.md` + `REGRAS_DE_CONSULTA` |
+| Skills             | pasta `skills/` (metadados no disco; roteamento pelas descrições das ferramentas) |
+| Override de modelo | `NLQ_MODEL`                                          |
+| Cache/roteamento   | `NLQ_SESSION_ID`, `NLQ_PIN_PROVIDER`, `NLQ_PROVIDER` |
+| Raciocínio         | `NLQ_REASONING` (`separate` padrão / `exclude` / `off`) |
+| Limites            | `NLQ_MAX_ROWS` (500), `NLQ_ROWS_DEFAULT` (20), `NLQ_TOOL_CALL_LIMIT` (25) |
+
+### Desempenho (otimizações)
+
+O gargalo de tempo é o **LLM** (tokens de entrada e número de chamadas), não o
+Pandas. Medidas aplicadas:
+
+- **Prompt enxuto** — `REGRAS_DE_CONSULTA` consolidado (uma fonte canônica de
+  roteamento) e descrições de ferramentas reduzidas; o payload fixo por chamada
+  caiu de ~25.900 para ~13.900 caracteres.
+- **Cache de prompt** — `session_id` estável faz o OpenRouter usar roteamento
+  fixo, aumentando `cache_read` entre as chamadas.
+- **Saída limitada** — `NLQ_MAX_TOKENS` (padrão `5000`) evita respostas que
+  estouram o teto (antes: uma geração de 10.000 tokens levava ~65 s). Respostas
+  que atingem o limite são sinalizadas como interrompidas.
+- **Anti-loop** — `CacheDeChamadas` devolve resultados repetidos e
+  `ToolCallLimitMiddleware(10)` impede exploração sem limites.
+- **Warm-up** — esquema/registros (e índice semântico) carregados em segundo
+  plano (`nlq/warmup.py`).
+
 
 ### Interface (CLI)
 
@@ -167,19 +185,14 @@ em `/docs`.
 |------------------------|--------|----------------------------------------------------------------------|
 | `/`                    | GET    | Serve o frontend estático (`frontend/index.html` — `StaticFiles(html=True)`) |
 | `/health`              | GET    | `{"status": "ok"}`                                                   |
-| `/api/chat`            | POST   | Recebe a pergunta na query string (`?request=...`), invoca o agente e devolve `{"response": "...", "planilha": {...} \| null}` |
-| `/api/limpar-conversa` | DELETE | `checkpointer.delete_thread("default")` → `{"status": "ok"}`         |
+| `/api/chat`            | POST   | Streaming NDJSON. Corpo `{"message": str, "thread_id": str}`. Eventos: `status` (processando/executando ferramenta/consultando modelo), `token` (texto parcial do modelo, coalescido em lotes), `result` (`response`, `planilha`), `error`, `ping`. Usa fila + keep-alive (10s) + cancelamento cooperativo. |
+| `/api/limpar-conversa` | DELETE | Corpo `{"thread_id": str}`. Bloqueia se consulta ativa para thread (`409`). Senão `checkpointer.delete_thread(thread_id)`. |
+| `/api/limpar-cache`    | DELETE | Sem corpo. Bloqueia se houver qualquer consulta ativa (`409`). Senão `limpar_cache_dataframes()` + `limpar_indices(disco=True)`; devolve `{status, dataframes_ram, indice_ram, consulta_ram, arquivos_disco, bytes_disco}`. |
 
 As rotas de API são registradas **antes** do mount estático em `/`, então
 `/health`, `/api/*` e `/docs` têm precedência sobre o frontend.
 
-A rota `/api/chat` monta o mesmo `config` da CLI (`thread_id="default"`), prefixa
-a mensagem com `"\nUser: "` e lê a resposta em `result["messages"][-1].content` —
-ou seja, **a API e a CLI compartilham a sessão**: perguntas feitas por uma
-interface aparecem na outra, e a thread só é zerada pelo `DELETE`. O campo
-`planilha` da resposta é preenchido por `_ultima_planilha()`, que varre os
-`tool_calls` do resultado em busca da última chamada a `create_json(name, ext)` —
-é o que a interface web mostra no indicador de planilha do topo.
+`/api/chat` monta `config={"configurable":{"thread_id": request.thread_id}}` e invoca agente via `agente.stream` com `stream_mode=["messages","values"]` em thread separada, publicando eventos em fila; apenas tokens de `AIMessageChunk` do modelo viram eventos `token` (mensagens de ferramenta e argumentos de tool-call são ignorados). O campo `planilha` em `result` é extraído via `_ultima_planilha()` (última chamada `create_json`). API e CLI compartilham o mesmo checkpointer (mesma memória entre execuções no mesmo processo).
 
 ## 3. Configuração do modelo
 
@@ -205,31 +218,29 @@ Parâmetros relevantes:
 | Variável             | Efeito                                                          |
 |----------------------|-----------------------------------------------------------------|
 | `OPENROUTER_API_KEY` | Chave usada por `check_openrouter_key()` e pelo provider OpenRouter |
-| `GROQ_API_KEY`       | Chave do provider Groq — **obrigatória**, mesmo usando OpenRouter |
+| `GROQ_API_KEY`       | Chave do provider Groq (usada quando selecionado)                 |
+| `OPENAI_API_KEY`     | Usada pela busca semântica (embeddings `text-embedding-3-small`)  |
 | `API_SELECT`         | Força o provider (`groq` / `openrouter`); vazio = autodetecção    |
 
 
-## 4. Tool de planilha
+## 4. Tools de planilha/dados
 
-Definida em `src/nlq/tools/extract.py` e registrada em `tools=[create_json,
-lista_arquivos]`. É o único caminho de **leitura** dos dados; a outra tool
-(`lista_arquivos`, ver §5) apenas informa quais planilhas existem.
+### `create_json` (extract.py)
+Extrai registros completos quando estritamente necessário. Registrada entre as tools.
 
-```
-LLM → create_json → parser (CSV | XLSX) → JSON → LLM
-```
+- Valida extensão (`csv`/`xlsx`), resolve em `data_dir()/ext/<name>.<ext>`, checa arquivo existe.
+- Usa `load_records()` (loader com cache). CSV: lista de dicts. XLSX: dict por aba (guiado por schema).
+- **Guarda por tamanho**: se JSON resultante > 20.000 caracteres, retorna mensagem `EXTRACAO_BLOQUEADA_POR_TAMANHO` orientando uso de `buscar_semantico`, sem repetir extração completa.
+- Retorno com `ensure_ascii=False`, `indent=2`, `default=str`. Logs `[TOOL] create_json inicio` e `[PERF] tool=create_json ...` (try/finally).
 
-```python
-@tool
-def create_json(name: str, ext: str) -> str
-```
+### `buscar_semantico` (retrieval.py)
+RAG com embeddings (OpenAI `text-embedding-3-small`). Retorna registros mais relevantes (com aba/origem e similaridade). Cache de índice por fingerprint (mtime/tamanho). Logs perf. `top_k` 1–20.
 
-- `name` — nome do arquivo sem extensão, por exemplo `academia`.
-- `ext` — extensão, por exemplo `csv` ou `xlsx`.
-- Resolve `sheets/<ext>/<name>.<ext>` a partir da raiz do pacote.
-- `ext` fora de `csv`/`xlsx` levanta `ValueError("Extensão não suportada")`.
-- Devolve o **JSON da planilha inteira**, com `ensure_ascii=False`, `indent=2` e
-  `default=str` (datas e tipos do `openpyxl` viram string).
+### `consultar_schema` (schema_info.py)
+Retorna estrutura (abas, regiões, cabeçalhos, colunas) **sem ler registros** (usa `xldetect` + normalização). Útil para perguntas estruturais.
+
+### `lista_arquivos` (listar_planilhas.py)
+Descobre planilhas em `sheets/csv/` e `sheets/xlsx/` (nomes com extensão).
 
 ### Leitura de CSV
 
@@ -281,7 +292,7 @@ Requisitos ainda **não atendidos** pela implementação atual:
   cabeçalho multinível vira coluna do primeiro nível, múltiplos blocos na mesma
   aba viram uma tabela só (detalhes em [`architecture.md`](architecture.md) §5).
 - `indent=2` infla o payload — em arquivo multi-aba o JSON pode se aproximar do
-  `max_tokens`.
+  `max_tokens`. **Guarda ativa:** `create_json` bloqueia extração acima de 20.000 caracteres e retorna mensagem orientando a usar `buscar_semantico` (não repete extração completa).
 
 ## 5. Tool de descoberta
 
@@ -307,32 +318,20 @@ pasta inexistente.
 
 ## 6. Prompt de sistema
 
-Montado por concatenação de dois arquivos Markdown em
-`src/nlq/agent/prompts/`, lidos por `load_prompt()`:
+Montado por concatenação de arquivos Markdown em `src/nlq/agent/prompts/` mais regras embutidas:
 
-- `system_base.md` — regras de funcionamento do agente. Tem três blocos:
-  regras gerais (uso das ferramentas, nunca inventar resultado, explicar erro),
-  estado e continuidade (reaproveitar análise anterior, não reiniciar fluxo) e
-  *sobre mostrar planilha* (exibir **todas** as abas, linhas e colunas, sem
-  resumir nem selecionar exemplos).
-- `specific_role.md` — **opcional**, define o escopo (papel, competência e base
-  normativa). Vem com um exemplo de domínio e pode ser editado ou substituído
-  livremente pelo usuário; o núcleo não depende do seu conteúdo.
+- `system_base.md` — regras de funcionamento do agente (uso de ferramentas, fidelidade, continuidade).
+- `specific_role.md` — define escopo do domínio (pode ser editado livremente).
+- `REGRAS_DE_CONSULTA` (constante em `agent.py`) — política operacional concisa: economia de etapas (planejar, paralelizar, não repetir consultas, não fazer rodadas de conferência), roteamento por objetivo (schema × dados × semântica × arquivos × extração), integridade/consolidação dos dados e resposta concisa sem passos intermediários.
 
-O bloco de continuidade e o de exibição completa dependem da memória de sessão e
-do retorno multi-aba: são o que permite seguir um fluxo entre turnos e receber a
-planilha inteira do XLSX.
-
-Os nomes são string hardcoded na chamada em `create_nlq_agent()`: renomear um
-arquivo exige atualizar essa referência, ou `load_prompt()` levanta
-`FileNotFoundError` no startup.
+O prompt completo é passado a `create_agent`. Os `SKILL.md` permanecem no disco como metadados, mas o roteamento é dado pelas descrições das próprias ferramentas.
 
 ## 7. Dívidas técnicas conhecidas
 
 ### Payload e contexto
 
 - **`indent=2` no JSON** aumenta o payload; XLSX multi-aba pode se aproximar do
-  `max_tokens` (7000 Groq / 10000 OpenRouter).
+  `max_tokens` (`NLQ_MAX_TOKENS`, padrão `5000`).
 - **Ausência de dado não sinalizada** pela tool (ver §4).
 - **Falha de leitura sem tratamento** — erros sobem crus para o LLM (ver §4).
 
@@ -354,20 +353,16 @@ arquivo exige atualizar essa referência, ou `load_prompt()` levanta
 
 ### Acesso a disco
 
-- **Path sem validação** — `name` e `ext` não são sanitizados, então `../../.env`
-  escapa de `sheets/`.
+- **Path com validação** — `buscar_semantico` e `consultar_schema` validam `is_relative_to(sheets_dir)`. `create_json` resolve sob `data_dir()/ext/` e checa `is_file()`.
 - **`ext` acoplado ao layout** — a extensão também nomeia a pasta em `sheets/`.
-- **`lista_arquivos` duplicado e sem guardas** (ver §5).
+- **`lista_arquivos`** — lê pastas CSV/XLSX (pode evoluir com filtragem por extensão e tratamento de pasta ausente).
 
 ### Agente e configuração
 
-- **Construção incondicional dos dois modelos** — exige `GROQ_API_KEY` mesmo
-  usando OpenRouter.
-- `model` pode ficar sem atribuição quando `API_SELECT` é inesperado e a chave do
-  OpenRouter é válida (ver [bug conhecido](#seleção-de-modelo)).
-- `requests` usado em `agent.py` sem estar declarado em `pyproject.toml`.
-- `check_openrouter_key()` faz uma chamada de rede a cada criação do agente
-  (inclusive já coberta pela autodetecção, quando `API_SELECT` está vazio).
+- **Seleção simplificada** — `usar_groq` evita construção ambígua; logs de inicialização `[MODELO]`.
+- `requests` usado em `agent.py`.
+- `check_openrouter_key()` faz uma chamada de rede para autodetecção (timeout 5s).
+- **Skills** — validadas na inicialização (RuntimeError se nenhuma SKILL.md). Carregadas via `FilesystemBackend` do deepagents.
 - Sem testes automatizados.
 
 ## 8. Evoluções possíveis
@@ -376,7 +371,7 @@ A próxima evolução prioriza diminuir o contexto enviado ao modelo:
 
 1. execução tabular local (Pandas ou executor equivalente) para filtros,
    agregações e ordenações;
-2. busca semântica/RAG para recuperar registros textualmente relacionados;
+2. aprimorar busca semântica/RAG (já implementada) com melhor seleção/filtros por aba;
 3. combinação dos dois para perguntas híbridas.
 
 AST fica reservada para quando a complexidade das operações justificar uma

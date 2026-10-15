@@ -16,20 +16,19 @@ consulta.
 
 ## Arquitetura
 
-O usuário pergunta, o agente (LangChain) leva a pergunta ao LLM, o LLM decide o
-que consultar, uma **tool de planilha** devolve o **JSON** dos dados, e o LLM
-interpreta, calcula e redige a resposta final. Uma **tool de descoberta** permite
-listar as planilhas disponíveis, e o checkpointer do agente carrega o histórico
-da sessão em cada turno.
+O usuário pergunta, o agente (LangChain + `deepagents`) leva a pergunta ao LLM, que decide o que consultar com base em regras que priorizam **busca semântica** para conteúdo. O agente conta com ferramentas para descobrir planilhas, consultar estrutura (schema), buscar por significado (RAG com embeddings) e, quando estritamente necessário, extrair registros completos. O checkpointer mantém o histórico da sessão em cada turno.
 
 ```
 Usuário → Pergunta → Agente (memória da sessão) → LLM
-   → lista_arquivos (descobre planilhas) | create_json → Parser (CSV | XLSX) → JSON
+   → lista_arquivos (descobre planilhas)
+   | consultar_schema (estrutura, sem registros)
+   | buscar_semantico (RAG por significado)
+   | create_json (extração completa, com guarda por tamanho)
+   → Parser (CSV | XLSX) + Schema (xldetect) → Dados/Registros
    → LLM → Resposta
 ```
 
-O agente é acessível por duas entradas — a CLI (`src/nlq/main.py`) e a API
-FastAPI (`src/nlq/api.py`) — ambas sobre a mesma sessão em memória.
+A API FastAPI (`src/nlq/api.py`) oferece **resposta em streaming** (NDJSON linha a linha) com eventos de status, tokens da resposta, resultado, erro e `ping` (keep-alive), além de cancelamento cooperativo. O agente é acessível por duas entradas — CLI (`src/nlq/main.py`) e API — ambas compartilhando a mesma sessão em memória (`thread_id="default"`).
 
 Detalhes em [`docs/architecture.md`](docs/architecture.md).
 
@@ -49,27 +48,31 @@ diferentes trocando apenas esse arquivo.
 
 ## Estado atual
 
-CLI funcional com agente LangChain conversando com um modelo. O agente tem
+CLI funcional com agente (`deepagents` + LangGraph) conversando com um modelo. O agente tem
 **memória da sessão** (`InMemorySaver` do LangGraph), então cada turno enxerga os
 turnos anteriores da mesma execução, e a interface é `rich` (prompt, spinner de
 raciocínio e Painel com Markdown na resposta).
 
-Há também uma **API FastAPI** (`src/nlq/api.py`) expondo o mesmo agente por HTTP,
-que serve ao mesmo tempo a **interface web** (`frontend/`, issue
+Há também uma **API FastAPI** (`src/nlq/api.py`) expondo o mesmo agente por HTTP
+com **streaming NDJSON** (eventos `status`, `token`, `result`, `error`, `ping`), que serve ao mesmo tempo a
+**interface web** (`frontend/`, issue
 [#19](https://github.com/gbrielmartinssreo/Natural-Language-Query/issues/19),
-**em andamento**): chat, loading, exibição de resposta e tratamento visual de
+**em andamento**): chat, loading, cancelamento de requisição, exibição de resposta e tratamento visual de
 erro já funcionam; falta a seleção/upload de planilha. As duas interfaces
-compartilham a mesma sessão (`thread_id="default"`).
+compartilham a mesma sessão (`thread_id="default"`), com bloqueio da limpeza de thread
+durante uma consulta em andamento.
 
-São **duas tools de planilha**:
+As **tools** disponíveis para leitura e descoberta de planilhas:
 
 - `lista_arquivos` — descobre o que existe em `sheets/csv/` e `sheets/xlsx/`.
-- `create_json` — lê o arquivo e devolve o **JSON** inteiro para o LLM
-  interpretar.
+- `consultar_schema` — descreve estrutura (abas, regiões tabulares, cabeçalhos, colunas) **sem ler registros** (usa `xldetect`).
+- `buscar_semantico` — busca semântica (RAG) com embeddings para localizar registros relevantes por significado (`top_k` entre 1 e 20).
+- `create_json` — extrai registros completos quando estritamente necessário. Possui **guarda por tamanho** (bloqueia extração acima de ~20.000 caracteres) para evitar enviar planilhas grandes ao LLM.
 
 Os dois formatos são suportados: **CSV** com `csv.DictReader` e fallback de
 codificação (`utf-8-sig` → `utf-8` → `cp1252` → `latin-1`), e **XLSX** com
-`openpyxl`, devolvendo **todas as abas** do arquivo (`{nome_da_aba: [linhas]}`).
+`openpyxl` guiado por schema (`xldetect`), devolvendo registros organizados por abas.
+O carregamento usa **cache em memória** (schema e registros) com invalidação por modificação do arquivo.
 
 `sheets/csv/` traz o escopo inicial (nível 1 da escala) e `sheets/xlsx/` traz
 planilhas de nível 2 — com várias abas. Já a planilha
@@ -138,15 +141,17 @@ API_SELECT=openrouter   # ou groq
 | `API_SELECT`  | Provider                                        |
 |----------------|-------------------------------------------------|
 | `groq`         | Groq — `openai/gpt-oss-120b`                    |
-| `openrouter`   | OpenRouter — `qwen/qwen3-30b-a3b-instruct-2507` |
+| `openrouter`   | OpenRouter — `deepseek/deepseek-v4-flash-0731`  |
 | ausente        | Groq se a chave do OpenRouter for inválida; OpenRouter caso contrário |
-| qualquer outro | `UnboundLocalError` — ver [bug conhecido](docs/agent.md#seleção-de-modelo) |
+| outro valor   | tratado como não-forçando Groq (segue lógica de detecção) |
 
-Os dois modelos usam `temperature=0.1` e `max_tokens` de **7000** (Groq) ou
-**10000** (OpenRouter) — limite relevante porque a tool de planilha envia a
-planilha inteira no contexto. O `timeout` fica em ~60 s por chamada ao modelo,
-com unidades distintas por integração: **60 s** no Groq e **60000 ms** no
-OpenRouter.
+Os dois modelos usam `temperature=0.1` e `max_tokens` de **2500**. O `timeout`
+fica em ~60 s por chamada ao modelo: **60 s** (segundos) no Groq e **60000 ms**
+no OpenRouter (unidades distintas por integração). A variável `NLQ_MODEL`
+sobrepõe o modelo; `NLQ_SESSION_ID`/`NLQ_PIN_PROVIDER`/`NLQ_PROVIDER` ajustam
+roteamento e cache de prompt no OpenRouter.
+
+A busca semântica usa **embeddings** (`text-embedding-3-small`) via API OpenAI, exigindo `OPENAI_API_KEY` (já presente em `.env.example`).
 
 
 ## Uso
@@ -172,8 +177,8 @@ uv run fastapi run    # produção
 A mesma API serve o frontend estático (`frontend/`): chat com balões de
 mensagem, markdown (tabelas e código), loading animado durante o processamento,
 indicador da planilha consultada, alternância de tema claro/escuro e status do
-backend. A resposta não usa streaming — o agente processa inteiro e devolve o
-resultado de uma vez.
+backend. A resposta usa streaming de tokens: o texto do modelo aparece
+progressivamente e, ao final, é substituído pelo markdown renderizado.
 
 ### API
 
@@ -192,17 +197,14 @@ carregado no startup, então as mesmas chaves de API são necessárias.
 |---------------------------|--------|-----------------------------------------------------------------------------------------------|
 | `/`                       | GET    | serve o frontend (`frontend/index.html`, via `StaticFiles(html=True)`)                        |
 | `/health`                 | GET    | health check (`{"status": "ok"}`)                                                             |
-| `/api/chat`               | POST   | envia a pergunta (query string `?request=...`) e devolve `{"response": "...", "planilha": {...}}` |
-| `/api/limpar-conversa`    | DELETE | apaga a thread `"default"` do checkpointer                                                    |
+| `/api/chat`               | POST   | streaming NDJSON com eventos (`status`, `token`, `result`, `error`, `ping`). Corpo: `{"message": ..., "thread_id": ...}`. Eventos `token` trazem o texto parcial (`content`); o evento `result` traz `response` e `planilha` (`{"nome": ..., "ext": ...}` ou `null`). |
+| `/api/limpar-conversa`    | DELETE | apaga a thread informada via `{"thread_id": ...}`. Retorna `409` se houver consulta em andamento para esse thread. |
+| `/api/limpar-cache`       | DELETE | limpa os caches em RAM (índices semânticos, embeddings de consulta, DataFrames) e os `index-*.pkl` de `/tmp/nlq-cache/`, devolvendo contagens. Retorna `409` se houver consulta em andamento. Sem autenticação; há botão "Limpar caches" na interface web. |
 
-`planilha` é a última planilha lida pelo agente na sessão (`{"nome": ..., "ext": ...}`)
-ou `null` quando nenhuma foi consultada — é o que o frontend exibe no indicador
-do topo. As rotas de API são registradas **antes** do mount estático, então
+As rotas de API são registradas **antes** do mount estático, então
 `/health` e `/api/*` têm precedência sobre `/`.
 
-A API usa o **mesmo** `thread_id="default"` da CLI: todas as requisições
-compartilham uma única sessão, e `DELETE /api/limpar-conversa` é o único caminho
-para limpá-la.
+A API compartilha o mesmo `checkpointer` com a CLI (memória em RAM). Por padrão a interface web usa `thread_id="default"`, mas o endpoint aceita `thread_id` por requisição. `DELETE /api/limpar-conversa` é bloqueado enquanto houver uma consulta ativa para o mesmo thread.
 
 ## Executável desktop (PyInstaller)
 
@@ -252,33 +254,35 @@ publica os artefatos `NLQ-linux-x86_64.zip` e `NLQ-windows-x86_64.zip`. Em tags
 src/nlq/
   main.py            # entry point (script `nlq`) — loop de chat com `rich`
   desktop.py         # entry point do executável — sobe a API local e abre o navegador
-  api.py             # API FastAPI — /api/chat, /api/limpar-conversa, /health + serve o frontend
+  api.py             # API FastAPI — streaming NDJSON (/api/chat), limpeza com bloqueio, health + frontend
   paths.py           # resolução de caminhos (desenvolvimento vs. empacotado)
   agent/
-    agent.py         # create_nlq_agent(): checkpointer + seleção de modelo + agente → (agente, checkpointer)
-    prompts/         # prompt de sistema montado por concatenação
-    skills/          # skills do agente (SKILL.md por pasta)
-  data/              # schema, carregamento e embeddings das planilhas
+    agent.py         # create_nlq_agent(): deepagents + FilesystemBackend + seleção de modelo + regras → (agente, checkpointer)
+    prompts/         # prompt de sistema montado por concatenação (system_base + specific_role + REGRAS_DE_CONSULTA)
+    skills/          # skills do agente (SKILL.md por pasta) montadas em "/"
+  data/              # schema (xldetect), loader com cache, embeddings, semantic_search, documents
   tools/
-    extract.py       # create_json(): tool de leitura de planilha (CSV e XLSX)
+    extract.py       # create_json(): tool com guarda por tamanho (bloqueio > ~20k chars)
     listar_planilhas.py  # lista_arquivos(): tool de descoberta das planilhas
-    dev_master.py    # módulo auxiliar (não é tool de planilha)
+    schema_info.py       # consultar_schema(): estrutura sem registros
+    retrieval.py         # buscar_semantico(): RAG com embeddings
+    dev_master.py        # módulo auxiliar (não é tool de planilha)
 frontend/
   index.html         # interface web — layout (sidebar, topbar, chat, composer)
   style.css          # tema claro/escuro, mensagens, tabelas, responsivo
-  app.js             # consumo da API, render de markdown, loading, tema e status
+  app.js             # consumo da API (stream NDJSON), render de markdown, loading, cancelamento, tema e status
 sheets/
-  csv/               # escopo inicial (nível 1)
-  xlsx/              # planilhas multi-aba (níveis 2 e 4)
+  csv/               # planilhas CSV
+  xlsx/              # planilhas XLSX
 nlq.spec             # spec do PyInstaller (distribuição em pasta)
 .env.example         # modelo das variáveis de ambiente
 .github/workflows/
   build.yml          # build Linux/Windows e release em tags `v*`
 docs/
   architecture.md         # arquitetura atual e fluxo da consulta
-  agent.md                # design do agente (modelo, memória, tools de planilha)
+  agent.md                # design do agente (deepagents, modelo, memória, tools, regras)
   development.md          # plano de branches, ambientes e deploy (milestone)
-  possible_implements.md  # plano futuro (Pandas + RAG; AST/NL2SQL condicionais...)
+  possible_implements.md  # evoluções planejadas/realizadas (RAG, schema, Pandas etc)
   scale_difficulties.md   # escala de dificuldade das planilhas (dimensiona o parser)
 ```
 

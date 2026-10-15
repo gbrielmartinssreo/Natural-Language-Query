@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 from langchain_core.tools import tool
@@ -7,6 +8,14 @@ from nlq.paths import data_dir
 
 
 from time import perf_counter
+
+# Orçamento de caracteres da resposta da ferramenta. Resultados muito
+# extensos inflam o contexto do modelo e aumentam a latência.
+LIMITE_CARACTERES = 6000
+
+# Limite de caracteres por registro, para não estourar o orçamento
+# com um único documento longo.
+LIMITE_POR_REGISTRO = 1500
 
 
 def _resolve_path(name: str, ext: str) -> Path:
@@ -32,17 +41,18 @@ def buscar_semantico(
     """
     Busca registros semanticamente relacionados a uma pergunta.
 
-    Prefira esta ferramenta para perguntas sobre assuntos, iniciativas,
-    medidas, problemas, objetivos ou metas específicos presentes no arquivo.
+    Use quando a identificação depender de significado, sinônimos ou
+    interpretação conceitual, mesmo quando as palavras da pergunta forem
+    diferentes das presentes na planilha. Não use quando os critérios
+    puderem ser verificados diretamente nos valores das colunas: nesse
+    caso, prefira consultar_dados.
+
     Evite extrair a planilha inteira para responder uma busca pontual.
     Não garante cobertura completa nem um resumo representativo do arquivo.
 
-    Use para encontrar indicadores, medidas, problemas e metas
-    relacionados ao significado da pergunta, mesmo quando as palavras
-    utilizadas forem diferentes das presentes na planilha.
-
-    Não use esta ferramenta para contagens, somas ou cálculos exatos.
-    Para essas operações, consulte os dados estruturados.
+    Não use esta ferramenta para contagens, somas, cálculos exatos nem
+    para filtros textuais por correspondência direta dos valores. Para
+    essas operações, use consultar_dados.
 
     Args:
         name: Nome do arquivo sem extensão, por exemplo matriz.
@@ -61,8 +71,9 @@ def buscar_semantico(
         if ext not in ("csv", "xlsx"):
             raise ValueError("Extensão não suportada")
 
-        if top_k < 1 or top_k > 20:
-            raise ValueError("top_k deve estar entre 1 e 20")
+        # Ajusta em vez de falhar: o modelo pode pedir um top_k fora
+        # da faixa e isso não deve interromper a consulta.
+        top_k = max(1, min(int(top_k), 20))
 
         path = _resolve_path(name, ext)
         results = search_documents(path, query, top_k=top_k)
@@ -73,16 +84,47 @@ def buscar_semantico(
             return resultado
 
         lines = []
+        total = 0
+        omitidos = 0
 
         for index, (document, score) in enumerate(results, start=1):
             sheet = document.metadata.get("sheet")
             location = f" | Aba: {sheet}" if sheet else ""
 
-            lines.append(
-                f"Resultado {index} | Similaridade: {score:.4f}{location}\n"
-                f"{document.page_content}"
+            registro = document.metadata.get("record_index")
+            ref = {"aba": sheet or "", "indice": registro}
+
+            conteudo = document.page_content
+
+            if len(conteudo) > LIMITE_POR_REGISTRO:
+                conteudo = (
+                    conteudo[:LIMITE_POR_REGISTRO]
+                    + "\n[...]"
+                )
+
+            bloco = (
+                f"Resultado {index} | Similaridade: {score:.4f}{location}"
+                f" | Registro: {registro}\n"
+                f"Ref para consultar_dados: "
+                f"{json.dumps(ref, ensure_ascii=False, separators=(',', ':'))}\n"
+                f"{conteudo}"
             )
 
+            # Sempre inclui o primeiro resultado; os demais respeitam
+            # o orçamento total de caracteres.
+            if lines and total + len(bloco) > LIMITE_CARACTERES:
+                omitidos = len(results) - index + 1
+                break
+
+            lines.append(bloco)
+            total += len(bloco) + len("\n\n---\n\n")
+
+        if omitidos:
+            lines.append(
+                f"[{omitidos} resultado(s) omitido(s) por limite de "
+                f"tamanho. Refine a busca ou use consultar_dados para "
+                f"dados exatos.]"
+            )
 
         resultado = "\n\n---\n\n".join(lines)
         status = "ok"

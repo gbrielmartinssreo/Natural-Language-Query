@@ -24,7 +24,8 @@ def create_json(name: str, ext: str) -> str:
     Extrai TODOS os registros de uma planilha e retorna seu conteúdo em JSON.
 
     Use somente quando for necessária uma extração ampla ou completa.
-    Para localizar informações sobre um assunto, prefira buscar_semantico.
+    Para filtros, contagens e operações sobre os valores, use consultar_dados.
+    Para localizar conteúdo por significado, use buscar_semantico.
     Para nomes de abas e colunas, use consultar_schema.
     Não use por padrão para perguntas gerais ou buscas pontuais.
 

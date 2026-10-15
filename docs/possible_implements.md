@@ -10,32 +10,26 @@ O estado atual e a arquitetura em vigor estão em
 
 ## 1. Próxima direção: reduzir o contexto enviado ao LLM
 
-A tool atual (`create_json`) devolve a planilha inteira em JSON. Isso funciona
-bem para arquivos pequenos e foi suficiente para validar o agente, mas não escala:
-o principal gargalo passa a ser o **volume de dados enviado ao modelo em cada
-pergunta**, não apenas o tempo de leitura do arquivo.
+Atualmente já existem: `consultar_schema` (estrutura sem registros), `buscar_semantico` (RAG com embeddings) e `create_json` com **bloqueio por tamanho** (20.000 caracteres) para evitar envio completo. Cache de schema/registros (loader) e índice semântico por fingerprint também já estão em vigor.
 
-Cachear o XLSX em memória pode evitar releitura e parsing, mas **não resolve o
-problema principal** se o JSON completo continuar sendo enviado ao LLM.
+A evolução continua separando:
 
-A próxima evolução deve separar:
+- **leitura/preparação local** — abrir e normalizar a planilha (já feito);
+- **seleção local** — localizar somente os registros necessários (parcialmente feito via RAG/schema);
+- **LLM** — interpretar a pergunta e redigir a resposta a partir de um contexto reduzido;
+- **executor tabular** — filtros, agregações e ordenações determinísticas localmente.
 
-- **leitura/preparação local** — abrir e normalizar a planilha;
-- **seleção local** — localizar somente os registros necessários;
-- **LLM** — interpretar a pergunta e redigir a resposta a partir de um contexto
-  reduzido.
+Ferramentas já implementadas/candidatas:
 
-Ferramentas candidatas:
+| Ferramenta | Função | Estado |
+|---|---|---|
+| `lista_arquivos` | Descobre planilhas | **Implementado** |
+| `consultar_schema` | Estrutura sem registros (xldetect) | **Implementado** |
+| `buscar_semantico` | Recupera registros por similaridade | **Implementado** |
+| `create_json` | Extração completa com guarda por tamanho | **Implementado** |
+| `consultar_dados` | Executor tabular (Pandas) para filtros/agregações | **Planejado** |
 
-| Ferramenta | Função |
-|---|---|
-| `listar_abas` | Descreve abas e colunas disponíveis |
-| `ler_esquema` | Retorna cabeçalhos, tipos e características da aba |
-| `consultar_dados` | Executa filtros, agregações e ordenações localmente |
-| `buscar_semantico` | Recupera registros por similaridade de significado |
-
-O objetivo é que uma pergunta sobre 10 registros relevantes não obrigue o modelo
-a reler milhares de linhas.
+O objetivo é que uma pergunta sobre poucos registros relevantes não obrigue o modelo a reler milhares de linhas.
 
 ---
 
@@ -392,9 +386,10 @@ evolução possível — o MVP não exigia build tooling.
 - filtros;
 - histórico da conversa além da sessão;
 - edição assistida, preview das alterações e download do arquivo modificado;
-- visualização das evidências usadas na resposta;
-- streaming da resposta (hoje a API responde de uma vez, e o frontend mostra o
-  loading enquanto espera).
+- visualização das evidências usadas na resposta.
+- ~~streaming da resposta~~ — **implementado**: o backend emite eventos `token`
+  (texto parcial do modelo, coalescido) antes do `result`, e o frontend renderiza
+  o texto progressivamente e substitui pelo markdown final.
 
 ### 7.3 Deploy
 
