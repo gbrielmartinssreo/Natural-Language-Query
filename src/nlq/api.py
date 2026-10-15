@@ -13,7 +13,9 @@ from langgraph.runtime import RunControl
 from pydantic import BaseModel
 
 from nlq.agent.agent import create_nlq_agent
+from nlq.data.semantic_search import limpar_indices
 from nlq.paths import frontend_dir, load_env
+from nlq.tools.consultar_dados import limpar_cache_dataframes
 from nlq.warmup import aquecer_em_segundo_plano
 
 
@@ -871,6 +873,39 @@ def clear_chat(
 
     return {
         "status": "ok",
+    }
+
+
+@app.delete("/api/limpar-cache")
+def clear_cache():
+
+    with _consultas_lock:
+        ativas = len(_consultas_ativas)
+
+    #
+    # Não apaga os caches enquanto há consulta em andamento: o agente
+    # pode estar lendo um índice semântico ou um DataFrame no momento.
+    #
+    if ativas:
+
+        return JSONResponse(
+            status_code=409,
+            content={
+                "status": "erro",
+                "message": (
+                    "Há consulta em andamento; "
+                    "aguarde antes de limpar os caches."
+                ),
+            },
+        )
+
+    dataframes = limpar_cache_dataframes()
+    semantica = limpar_indices(disco=True)
+
+    return {
+        "status": "ok",
+        "dataframes_ram": dataframes,
+        **semantica,
     }
 
 

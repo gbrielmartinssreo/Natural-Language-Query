@@ -187,6 +187,7 @@ em `/docs`.
 | `/health`              | GET    | `{"status": "ok"}`                                                   |
 | `/api/chat`            | POST   | Streaming NDJSON. Corpo `{"message": str, "thread_id": str}`. Eventos: `status` (processando/executando ferramenta/consultando modelo), `token` (texto parcial do modelo, coalescido em lotes), `result` (`response`, `planilha`), `error`, `ping`. Usa fila + keep-alive (10s) + cancelamento cooperativo. |
 | `/api/limpar-conversa` | DELETE | Corpo `{"thread_id": str}`. Bloqueia se consulta ativa para thread (`409`). Senão `checkpointer.delete_thread(thread_id)`. |
+| `/api/limpar-cache`    | DELETE | Sem corpo. Bloqueia se houver qualquer consulta ativa (`409`). Senão `limpar_cache_dataframes()` + `limpar_indices(disco=True)`; devolve `{status, dataframes_ram, indice_ram, consulta_ram, arquivos_disco, bytes_disco}`. |
 
 As rotas de API são registradas **antes** do mount estático em `/`, então
 `/health`, `/api/*` e `/docs` têm precedência sobre o frontend.

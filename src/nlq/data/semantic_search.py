@@ -146,6 +146,42 @@ def warm_index(path: str | Path) -> None:
     _get_index(path)
 
 
+def limpar_indices(disco: bool = True) -> dict:
+    """Libera os caches de busca semântica (RAM e, opcionalmente, disco).
+
+    Zera os índices e os embeddings de consulta mantidos em memória e,
+    com ``disco=True``, apaga os ``index-*.pkl`` persistidos.
+
+    A próxima busca semântica reconstrói o índice sob demanda (o que
+    custa novas chamadas de embedding). Não usar com consultas ativas.
+    """
+
+    liberado: dict = {
+        "indice_ram": len(_INDEX_CACHE),
+        "consulta_ram": len(_QUERY_CACHE),
+        "arquivos_disco": 0,
+        "bytes_disco": 0,
+    }
+
+    _INDEX_CACHE.clear()
+    _QUERY_CACHE.clear()
+
+    if disco:
+        pasta = _cache_dir()
+
+        if pasta.is_dir():
+            for arquivo in pasta.glob("index-*.pkl"):
+                try:
+                    liberado["bytes_disco"] += arquivo.stat().st_size
+                    arquivo.unlink()
+                    liberado["arquivos_disco"] += 1
+                except OSError:
+                    # Arquivo em uso ou já removido: segue a limpeza.
+                    pass
+
+    return liberado
+
+
 def _embed_query(query: str) -> list[float]:
     """Gera (ou reaproveita) o embedding de uma consulta."""
     cached = _QUERY_CACHE.get(query)

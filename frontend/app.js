@@ -2,6 +2,7 @@
 const API_URL = "";
 const ROTA_CHAT = "/api/chat";
 const ROTA_LIMPAR = "/api/limpar-conversa";
+const ROTA_LIMPAR_CACHE = "/api/limpar-cache";
 const ROTA_STATUS = "/health";
 
 const SUGESTOES = [
@@ -26,6 +27,7 @@ const el = {
   planilhaChip: $("planilhaChip"),
   planilhaNome: $("planilhaNome"),
   clearHistory: $("clearHistory"),
+  clearCache: $("clearCache"),
   themeToggle: $("themeToggle"),
   sidebarToggle: $("sidebarToggle"),
   backdrop: $("backdrop"),
@@ -691,6 +693,62 @@ async function limparHistorico() {
 }
 
 
+// ====== LIMPAR CACHES ======
+async function limparCaches() {
+  if (
+    !confirm(
+      "Limpar os caches em memória e em disco? " +
+        "A próxima consulta vai reconstruir o índice semântico."
+    )
+  ) {
+    return;
+  }
+
+  try {
+    const r = await fetch(
+      API_URL + ROTA_LIMPAR_CACHE,
+      {
+        method: "DELETE",
+        headers: {
+          "Content-Type": "application/json",
+        },
+      }
+    );
+
+    if (!r.ok) {
+      if (r.status === 409) {
+        throw new Error(
+          "Há uma consulta em andamento. " +
+            "Interrompa-a antes de limpar os caches."
+        );
+      }
+
+      throw new Error(
+        "Erro " + r.status
+      );
+    }
+
+    const dados = await r.json();
+
+    alert(
+      "Caches limpos: " +
+        dados.dataframes_ram +
+        " aba(s) em RAM, " +
+        dados.indice_ram +
+        " índice(s) semântico(s) e " +
+        dados.arquivos_disco +
+        " arquivo(s) em disco."
+    );
+
+  } catch (erro) {
+    alert(
+      "Não consegui limpar os caches: " +
+      erro.message
+    );
+  }
+}
+
+
 // ====== TEMA ======
 function temaAtual() {
   const salvo =
@@ -792,6 +850,12 @@ el.stopBtn.addEventListener(
 el.clearHistory.addEventListener(
   "click",
   limparHistorico
+);
+
+
+el.clearCache.addEventListener(
+  "click",
+  limparCaches
 );
 
 

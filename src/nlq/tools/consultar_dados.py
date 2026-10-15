@@ -33,7 +33,7 @@ from langchain_core.tools import tool
 from nlq.data.loader import load_records
 from nlq.paths import data_dir
 
-__all__ = ["consultar_dados"]
+__all__ = ["consultar_dados", "limpar_cache_dataframes"]
 
 OPERACOES = ("contar", "filtrar", "agregar", "agrupar", "ordenar", "metas", "distintos")
 
@@ -176,6 +176,19 @@ def _load_frames(path: Path) -> dict[str, pd.DataFrame]:
 
     _DF_CACHE[key] = (fingerprint, frames)
     return frames
+
+
+def limpar_cache_dataframes() -> int:
+    """Descarta os DataFrames em cache e devolve quantos eram removidos.
+
+    A próxima consulta recarrega a planilha do disco. Não usar com
+    consultas ativas.
+    """
+
+    removidos = len(_DF_CACHE)
+    _DF_CACHE.clear()
+
+    return removidos
 
 
 def _select_scope(frames: dict[str, pd.DataFrame], aba: str) -> pd.DataFrame:

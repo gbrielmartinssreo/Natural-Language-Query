@@ -57,7 +57,7 @@ semi-estruturadas ou corporativas exigem interpretação que ainda não existe
 | Componente            | Onde                                | Papel                                                            | Estado       |
 |-----------------------|-------------------------------------|------------------------------------------------------------------|--------------|
 | Interface (CLI)       | `src/nlq/main.py`                   | Recebe a pergunta e imprime a resposta (`rich`)                  | **Atual**    |
-| API (FastAPI)         | `src/nlq/api.py`                    | Expõe agente via streaming NDJSON (`status`, `token`, `result`, `error`, `ping`): `POST /api/chat`, `DELETE /api/limpar-conversa`, `GET /health`. Fila + keep-alive + cancelamento cooperativo | **Atual**    |
+| API (FastAPI)         | `src/nlq/api.py`                    | Expõe agente via streaming NDJSON (`status`, `token`, `result`, `error`, `ping`): `POST /api/chat`, `DELETE /api/limpar-conversa`, `DELETE /api/limpar-cache`, `GET /health`. Fila + keep-alive + cancelamento cooperativo | **Atual**    |
 | Agente (langchain)    | `src/nlq/agent/agent.py`            | Orquestra o ciclo LLM ↔ ferramentas via `create_agent`; middleware (`CacheDeChamadas`, `ToolCallLimitMiddleware`, `TratarErroDeTool`) | **Atual**    |
 | LLM (Groq/OpenRouter) | `src/nlq/agent/agent.py`            | Decide estratégia, interpreta e redige resposta; `session_id` p/ cache de prompt | **Atual**    |
 | Prompt de sistema     | `src/nlq/agent/prompts/`            | `system_base.md` + `specific_role.md` + `REGRAS_DE_CONSULTA`     | **Atual**    |
@@ -164,6 +164,13 @@ núcleo dependa do seu conteúdo.
   descarta a sessão.
 - **`thread_id` fixo em `"default"`** — uma única sessão por execução, sem
   separação de conversas nem concorrência.
+- **Caches em RAM** — além do checkpointer, a execução mantém `_INDEX_CACHE` e
+  `_QUERY_CACHE` (`semantic_search.py`, vetores de ~50 KB cada) e `_DF_CACHE`
+  (`consultar_dados.py`, DataFrames por planilha). `limpar_indices()` e
+  `limpar_cache_dataframes()` liberam essas estruturas; `DELETE /api/limpar-cache`
+  as chama (sem autenticação, com `409` se houver consulta em andamento) e também
+  apaga os `index-*.pkl` de `/tmp/nlq-cache/`. A próxima busca semântica ou
+  consulta reconstrói o índice sob demanda.
 
 ### Acesso a disco
 

@@ -199,6 +199,7 @@ carregado no startup, então as mesmas chaves de API são necessárias.
 | `/health`                 | GET    | health check (`{"status": "ok"}`)                                                             |
 | `/api/chat`               | POST   | streaming NDJSON com eventos (`status`, `token`, `result`, `error`, `ping`). Corpo: `{"message": ..., "thread_id": ...}`. Eventos `token` trazem o texto parcial (`content`); o evento `result` traz `response` e `planilha` (`{"nome": ..., "ext": ...}` ou `null`). |
 | `/api/limpar-conversa`    | DELETE | apaga a thread informada via `{"thread_id": ...}`. Retorna `409` se houver consulta em andamento para esse thread. |
+| `/api/limpar-cache`       | DELETE | limpa os caches em RAM (índices semânticos, embeddings de consulta, DataFrames) e os `index-*.pkl` de `/tmp/nlq-cache/`, devolvendo contagens. Retorna `409` se houver consulta em andamento. Sem autenticação; há botão "Limpar caches" na interface web. |
 
 As rotas de API são registradas **antes** do mount estático, então
 `/health` e `/api/*` têm precedência sobre `/`.
