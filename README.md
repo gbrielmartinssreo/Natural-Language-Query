@@ -16,19 +16,30 @@ consulta.
 
 ## Arquitetura
 
-O usuário pergunta, o agente (LangChain + `deepagents`) leva a pergunta ao LLM, que decide o que consultar com base em regras que priorizam **busca semântica** para conteúdo. O agente conta com ferramentas para descobrir planilhas, consultar estrutura (schema), buscar por significado (RAG com embeddings) e, quando estritamente necessário, extrair registros completos. O checkpointer mantém o histórico da sessão em cada turno.
+O usuário pergunta, o agente (LangChain) leva a pergunta ao LLM, que decide o que consultar com base em regras que priorizam **busca semântica** para conteúdo. O agente conta com ferramentas para descobrir planilhas, consultar estrutura (schema), buscar de forma estruturada (Pandas), buscar por significado (RAG com embeddings) e, quando estritamente necessário, extrair registros completos. O checkpointer mantém o histórico da sessão em cada turno.
 
-```
-Usuário → Pergunta → Agente (memória da sessão) → LLM
-   → lista_arquivos (descobre planilhas)
-   | consultar_schema (estrutura, sem registros)
-   | buscar_semantico (RAG por significado)
-   | create_json (extração completa, com guarda por tamanho)
-   → Parser (CSV | XLSX) + Schema (xldetect) → Dados/Registros
-   → LLM → Resposta
+``` mermaid
+sequenceDiagram
+    autonumber
+    actor U as Usuário
+    participant A as Agente
+    participant L as LLM
+    participant T as Tools
+    participant D as Dados
+
+    U->>A: Pergunta
+    A->>L: Pergunta + contexto + ferramentas
+    L-->>A: Solicita execução de ferramenta
+    A->>T: Executa ferramenta selecionada
+    T->>D: Consulta arquivos
+    D-->>T: Retorna dados
+    T-->>A: Resultado
+    A->>L: Resultado da ferramenta
+    L-->>A: Resposta final
+    A-->>U: Resposta
 ```
 
-A API FastAPI (`src/nlq/api.py`) oferece **resposta em streaming** (NDJSON linha a linha) com eventos de status, tokens da resposta, resultado, erro e `ping` (keep-alive), além de cancelamento cooperativo. O agente é acessível por duas entradas — CLI (`src/nlq/main.py`) e API — ambas compartilhando a mesma sessão em memória (`thread_id="default"`).
+O agente é acessível por duas entradas — CLI (`src/nlq/main.py`) e API (`src/nlq/api.py`)— ambas compartilhando a mesma sessão em memória (`thread_id="default"`).
 
 Detalhes em [`docs/architecture.md`](docs/architecture.md).
 
@@ -48,18 +59,15 @@ diferentes trocando apenas esse arquivo.
 
 ## Estado atual
 
-CLI funcional com agente (`deepagents` + LangGraph) conversando com um modelo. O agente tem
+CLI funcional com agente conversando com um modelo. O agente tem
 **memória da sessão** (`InMemorySaver` do LangGraph), então cada turno enxerga os
-turnos anteriores da mesma execução, e a interface é `rich` (prompt, spinner de
-raciocínio e Painel com Markdown na resposta).
+turnos anteriores da mesma execução, e a interface utiliza `rich` para melhorar a qualidade visual das respostas.
 
 Há também uma **API FastAPI** (`src/nlq/api.py`) expondo o mesmo agente por HTTP
-com **streaming NDJSON** (eventos `status`, `token`, `result`, `error`, `ping`), que serve ao mesmo tempo a
-**interface web** (`frontend/`, issue
-[#19](https://github.com/gbrielmartinssreo/Natural-Language-Query/issues/19),
-**em andamento**): chat, loading, cancelamento de requisição, exibição de resposta e tratamento visual de
-erro já funcionam; falta a seleção/upload de planilha. As duas interfaces
-compartilham a mesma sessão (`thread_id="default"`), com bloqueio da limpeza de thread
+com **streaming NDJSON** (eventos `status`, `token`, `result`, `error`, `ping`), que serve a
+**interface web**, que conta com: chat, loading, cancelamento de requisição, exibição de resposta e tratamento visual de
+erro; falta a seleção/upload de planilha. 
+As duas interfaces compartilham a mesma sessão (`thread_id="default"`), com bloqueio da limpeza de thread
 durante uma consulta em andamento.
 
 As **tools** disponíveis para leitura e descoberta de planilhas:
@@ -68,71 +76,30 @@ As **tools** disponíveis para leitura e descoberta de planilhas:
 - `consultar_schema` — descreve estrutura (abas, regiões tabulares, cabeçalhos, colunas) **sem ler registros** (usa `xldetect`).
 - `buscar_semantico` — busca semântica (RAG) com embeddings para localizar registros relevantes por significado (`top_k` entre 1 e 20).
 - `create_json` — extrai registros completos quando estritamente necessário. Possui **guarda por tamanho** (bloqueia extração acima de ~20.000 caracteres) para evitar enviar planilhas grandes ao LLM.
+- `consulta_dados` — busca estruturada com pandas para executar filtros, contagens, agregações e cálculos.
 
 Os dois formatos são suportados: **CSV** com `csv.DictReader` e fallback de
 codificação (`utf-8-sig` → `utf-8` → `cp1252` → `latin-1`), e **XLSX** com
 `openpyxl` guiado por schema (`xldetect`), devolvendo registros organizados por abas.
 O carregamento usa **cache em memória** (schema e registros) com invalidação por modificação do arquivo.
 
-`sheets/csv/` traz o escopo inicial (nível 1 da escala) e `sheets/xlsx/` traz
-planilhas de nível 2 — com várias abas. Já a planilha
-`MATRIZ ENCAMINHADA - FINAL.xlsx` (nível 4) é **legível**, mas sem tratamento de
-células mescladas e cabeçalho multinível, então ainda não é confiável para
-resposta (ver [`docs/scale_difficulties.md`](docs/scale_difficulties.md)).
+[`docs/scale_difficulties.md`](docs/scale_difficulties.md)).
 
 ## Próximos passos
-
-Há duas milestones abertas no momento, com issues em aberto (a #19 está em
-andamento) — é o plano imediato:
-
-### [MVP com foco na análise da LLM](https://github.com/gbrielmartinssreo/Natural-Language-Query/milestone/1)
-
-| Issue | Escopo |
-|-------|--------|
-| [#10](https://github.com/gbrielmartinssreo/Natural-Language-Query/issues/10) | Testes unitários para as tools existentes |
-| [#12](https://github.com/gbrielmartinssreo/Natural-Language-Query/issues/12) | Persistência de contexto e técnica de compactação de tokens |
-| [#15](https://github.com/gbrielmartinssreo/Natural-Language-Query/issues/15) | Skills de análise e listagem (formatação de listagens e passos de extração) |
-
-### [MVP com web / deploy / estabilidade](https://github.com/gbrielmartinssreo/Natural-Language-Query/milestone/2)
-
-| Issue | Escopo |
-|-------|--------|
-| [#16](https://github.com/gbrielmartinssreo/Natural-Language-Query/issues/16) | Fluxo de branches: criar `develop`, `main` como produção, proteger `main` |
-| [#17](https://github.com/gbrielmartinssreo/Natural-Language-Query/issues/17) | Ambiente de desenvolvimento: deploy ligado à `develop`, env vars de dev, URL fixa de teste |
-| [#18](https://github.com/gbrielmartinssreo/Natural-Language-Query/issues/18) | Ambiente de produção: deploy na `main`, env vars de produção, URL fixa |
-| [#19](https://github.com/gbrielmartinssreo/Natural-Language-Query/issues/19) | Interface web: chat, seleção/upload de planilha, loading, resposta e tratamento visual de erro — **em andamento** (chat, loading, resposta e erros prontos no `frontend/`; falta seleção/upload de planilha) |
-
-O fluxo de branches e os ambientes da segunda milestone estão detalhados em
-[`docs/development.md`](docs/development.md); o escopo da interface web, em
-[`docs/possible_implements.md`](docs/possible_implements.md) §7. A plataforma de
-deploy ainda é **decisão pendente**.
+[`docs/possible_implements.md`](docs/possible_implements.md)
 
 ## Requisitos
 
 - [uv](https://docs.astral.sh/uv/)
 - Python `>=3.14` (ver `.python-version`)
-- Chaves de API do [OpenRouter](https://openrouter.ai/) **e** do
-  [Groq](https://console.groq.com/keys)
-
-> **Ambas são obrigatórias para iniciar.** `create_nlq_agent()` constrói os dois
-> modelos antes de escolher entre eles, então a construção falha sem
-> `GROQ_API_KEY` mesmo quando o provider escolhido é o OpenRouter.
+- Chaves de API do Openrouter/groq e Openai
 
 ## Configuração
 
 Há um modelo com todas as variáveis em [`.env.example`](.env.example). Em
-desenvolvimento, crie um `.env` na raiz do projeto; no executável empacotado, o
-`.env` fica **ao lado do executável** (ver
-[Executável desktop](#executável-desktop-pyinstaller)):
+desenvolvimento, crie um `.env` na raiz do projeto.
 
-```env
-OPENROUTER_API_KEY=sua-chave-aqui
-GROQ_API_KEY=sua-chave-aqui
-OPENAI_API_KEY=sua-chave-aqui   # usada pela busca semântica (embeddings)
-```
-
-A chave do OpenRouter é validada no startup: se a chamada falhar, o agente usa o
-Groq. Para fixar o provider, use `API_SELECT`:
+Para fixar o provider, use `API_SELECT`:
 
 ```env
 API_SELECT=openrouter   # ou groq
@@ -145,11 +112,6 @@ API_SELECT=openrouter   # ou groq
 | ausente        | Groq se a chave do OpenRouter for inválida; OpenRouter caso contrário |
 | outro valor   | tratado como não-forçando Groq (segue lógica de detecção) |
 
-Os dois modelos usam `temperature=0.1` e `max_tokens` de **2500**. O `timeout`
-fica em ~60 s por chamada ao modelo: **60 s** (segundos) no Groq e **60000 ms**
-no OpenRouter (unidades distintas por integração). A variável `NLQ_MODEL`
-sobrepõe o modelo; `NLQ_SESSION_ID`/`NLQ_PIN_PROVIDER`/`NLQ_PROVIDER` ajustam
-roteamento e cache de prompt no OpenRouter.
 
 A busca semântica usa **embeddings** (`text-embedding-3-small`) via API OpenAI, exigindo `OPENAI_API_KEY` (já presente em `.env.example`).
 
@@ -201,44 +163,8 @@ carregado no startup, então as mesmas chaves de API são necessárias.
 | `/api/limpar-conversa`    | DELETE | apaga a thread informada via `{"thread_id": ...}`. Retorna `409` se houver consulta em andamento para esse thread. |
 | `/api/limpar-cache`       | DELETE | limpa os caches em RAM (índices semânticos, embeddings de consulta, DataFrames) e os `index-*.pkl` de `/tmp/nlq-cache/`, devolvendo contagens. Retorna `409` se houver consulta em andamento. Sem autenticação; há botão "Limpar caches" na interface web. |
 
-As rotas de API são registradas **antes** do mount estático, então
-`/health` e `/api/*` têm precedência sobre `/`.
 
 A API compartilha o mesmo `checkpointer` com a CLI (memória em RAM). Por padrão a interface web usa `thread_id="default"`, mas o endpoint aceita `thread_id` por requisição. `DELETE /api/limpar-conversa` é bloqueado enquanto houver uma consulta ativa para o mesmo thread.
-
-## Executável desktop (PyInstaller)
-
-Além de rodar em desenvolvimento, o NLQ pode ser distribuído como um
-**executável local em pasta** (sem instalação). O código e os recursos internos
-(**frontend, prompts e skills**) vão dentro do pacote; **`.env` e `sheets/`
-ficam fora**, ao lado do executável, para serem editados sem reconstruir a
-aplicação. Os caminhos são resolvidos por [`src/nlq/paths.py`](src/nlq/paths.py):
-
-| Recurso | Desenvolvimento | Empacotado |
-|---------|-----------------|------------|
-| frontend / prompts / skills | repositório | `_internal/` do pacote |
-| `sheets/` | raiz do repositório | ao lado do executável |
-| `.env` | raiz do repositório | ao lado do executável |
-
-Para gerar o pacote:
-
-```bash
-uv run --with pyinstaller pyinstaller --noconfirm --clean nlq.spec
-```
-
-O resultado fica em `dist/NLQ/`:
-
-```
-dist/NLQ/
-  NLQ            # executável (NLQ.exe no Windows)
-  _internal/     # código e recursos internos (frontend, prompts, skills)
-  .env.example   # copie para .env e preencha as chaves
-  sheets/        # planilhas do usuário (csv/ e xlsx/)
-```
-
-O executável sobe a API em `127.0.0.1`, escolhe uma porta livre a partir de
-`8000`, abre o navegador e encerra com Ctrl+C. O ponto de entrada é
-[`src/nlq/desktop.py`](src/nlq/desktop.py).
 
 ### Build automático (GitHub Actions)
 
@@ -285,22 +211,3 @@ docs/
   possible_implements.md  # evoluções planejadas/realizadas (RAG, schema, Pandas etc)
   scale_difficulties.md   # escala de dificuldade das planilhas (dimensiona o parser)
 ```
-
-## Evoluções possíveis
-
-A próxima direção é evitar que planilhas grandes sejam enviadas inteiras ao LLM
-em toda pergunta. O plano prioriza:
-
-- **execução tabular local (Pandas)** para filtros, agregações e consultas exatas;
-- **busca semântica/RAG** para localizar registros por significado;
-- uso híbrido dos dois quando a pergunta combinar semântica e cálculo.
-
-**AST** permanece como possibilidade futura caso a camada de consulta cresça a
-ponto de precisar de uma representação intermediária própria. **NL2SQL** deixa
-de ser prioridade para planilhas genéricas e fica reservado para fontes
-relacionais reais ou dados claramente relacionais.
-
-Persistência de sessão, validação de respostas e ferramentas de esquema também
-continuam como evoluções possíveis.
-
-[`docs/possible_implements.md`](docs/possible_implements.md)

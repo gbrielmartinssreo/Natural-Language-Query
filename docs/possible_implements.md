@@ -10,24 +10,31 @@ O estado atual e a arquitetura em vigor estão em
 
 ## 1. Próxima direção: reduzir o contexto enviado ao LLM
 
-Atualmente já existem: `consultar_schema` (estrutura sem registros), `buscar_semantico` (RAG com embeddings) e `create_json` com **bloqueio por tamanho** (20.000 caracteres) para evitar envio completo. Cache de schema/registros (loader) e índice semântico por fingerprint também já estão em vigor.
+Atualmente já existem: `consultar_schema` (estrutura sem registros),
+`buscar_semantico` (RAG com embeddings), `consultar_dados` (executor tabular
+Pandas) e `create_json` com **bloqueio por tamanho** (20.000 caracteres) para
+evitar envio completo. Cache de schema/registros (loader), índice semântico por
+fingerprint e poda de contexto também já estão em vigor.
 
-A evolução continua separando:
+A camada de seleção/execução local está implementada; o que resta é refinar:
 
-- **leitura/preparação local** — abrir e normalizar a planilha (já feito);
-- **seleção local** — localizar somente os registros necessários (parcialmente feito via RAG/schema);
-- **LLM** — interpretar a pergunta e redigir a resposta a partir de um contexto reduzido;
-- **executor tabular** — filtros, agregações e ordenações determinísticas localmente.
+- **leitura/preparação local** — abrir e normalizar a planilha (feito);
+- **seleção local** — localizar somente os registros necessários (feito via
+  RAG + schema + `refs`);
+- **executor tabular** — filtros, agregações e ordenações determinísticas
+  (feito em `consultar_dados`);
+- **LLM** — interpretar a pergunta e redigir a resposta a partir de um contexto
+  reduzido.
 
-Ferramentas já implementadas/candidatas:
+Ferramentas já implementadas:
 
 | Ferramenta | Função | Estado |
 |---|---|---|
 | `lista_arquivos` | Descobre planilhas | **Implementado** |
 | `consultar_schema` | Estrutura sem registros (xldetect) | **Implementado** |
 | `buscar_semantico` | Recupera registros por similaridade | **Implementado** |
+| `consultar_dados` | Executor tabular (Pandas) para filtros/agregações | **Implementado** |
 | `create_json` | Extração completa com guarda por tamanho | **Implementado** |
-| `consultar_dados` | Executor tabular (Pandas) para filtros/agregações | **Planejado** |
 
 O objetivo é que uma pergunta sobre poucos registros relevantes não obrigue o modelo a reler milhares de linhas.
 
@@ -53,9 +60,9 @@ decisão de estratégia
           LLM
 ```
 
-### 2.1 Pandas / execução tabular — prioridade
+### 2.1 Pandas / execução tabular — prioridade (implementada)
 
-É a primeira evolução para perguntas como:
+Implementado em `consultar_dados`. Cobre perguntas como:
 
 - contagens;
 - filtros;
@@ -65,12 +72,16 @@ decisão de estratégia
 - cruzamentos simples entre dados já identificados.
 
 O objetivo não é deixar o LLM gerar código Pandas arbitrário, mas usar uma tool
-controlada que receba uma operação estruturada e execute localmente.
+controlada que receba uma operação estruturada e execute localmente — o que já
+ocorre: a LLM informa a operação (`contar`, `filtrar`, `agregar`, `agrupar`,
+`ordenar`, `metas`, `distintos`) e os parâmetros, validados contra as colunas
+reais, e nenhum `eval`/`exec` é usado.
 
-### 2.2 Busca semântica / RAG — prioridade
+### 2.2 Busca semântica / RAG — prioridade (implementada)
 
-É indicada para planilhas com campos de texto em que a pergunta e a célula podem
-usar vocabulários diferentes, por exemplo:
+Implementado em `buscar_semantico`. É indicada para planilhas com campos de
+texto em que a pergunta e a célula podem usar vocabulários diferentes, por
+exemplo:
 
 - "reintegração social" ↔ "apoio ao egresso";
 - "fortalecimento institucional" ↔ ações descritas sem esse termo literal;
@@ -317,25 +328,26 @@ operações tabulares e edição de arquivos.
 
 ## 6. Persistência de sessão
 
-A memória **por execução** já existe: `InMemorySaver` do LangGraph, com um
-`thread_id` fixo em `"default"` — compartilhado pela CLI (`main.py`) e pela API
-(`api.py`), que enxergam a mesma sessão.
+A memória **por execução** já existe: `InMemorySaver` do LangGraph,
+compartilhado pela CLI (`main.py`) e pela API (`api.py`). A CLI usa
+`thread_id="default"`; a API aceita `thread_id` por requisição, então **múltiplas
+threads** já são suportadas em um mesmo processo.
 
-Follow-ups funcionam porque o estado volta no `invoke`.
+Follow-ups funcionam porque o estado volta no `invoke`. O tamanho do histórico
+enviado ao modelo é controlado por `ContextEditingMiddleware`
+(`NLQ_CONTEXT_TRIGGER_TOKENS` / `NLQ_CONTEXT_KEEP_TOOL_RESULTS`), que substitui
+resultados de ferramenta antigos por `[cleared]` apenas na chamada ao modelo.
 
 Possíveis evoluções:
 
-- checkpointer persistente (SQLite ou Postgres);
-- múltiplas threads;
-- política de tamanho do histórico;
-- resumo ou trimming de conversas longas;
+- checkpointer persistente (SQLite ou Postgres), para sobreviver ao processo;
+- resumo (summarization) de conversas longas em vez de apenas podar tools;
 - separação entre memória conversacional e conhecimento persistente.
 
-Persistência não é prioridade enquanto existir uma única sessão por execução,
-mas ganha relevância justamente porque o frontend web (issue
-[#19](https://github.com/gbrielmartinssreo/Natural-Language-Query/issues/19))
-já é servido pela API: aí o histórico precisa sobreviver ao processo e
-separar usuários.
+Persistência passa a ser prioridade porque o frontend web (issue
+[#19](https://github.com/gbrielmartinssreo/Natural-Language-Query/issues/19)) já é
+servido pela API: sem persistência em disco, reiniciar o processo perde todas as
+conversas.
 
 ---
 
@@ -364,7 +376,8 @@ Requisitos mínimos da
 - [x] tratamento visual de erro.
 
 **Backend: implementado** (`src/nlq/api.py`, com `POST /api/chat` — que também
-devolve a `planilha` consultada —, `DELETE /api/limpar-conversa` e `GET /health`;
+devolve a `planilha` consultada e emite tokens parciais e raciocínio separado —,
+`DELETE /api/limpar-conversa`, `DELETE /api/limpar-cache` e `GET /health`;
 entrypoint `nlq.api:app` em `[tool.fastapi]` no `pyproject.toml`).
 
 **Frontend: implementado** (`frontend/`, HTML/CSS/JS puro servido pelo
@@ -374,7 +387,7 @@ entrypoint `nlq.api:app` em `[tool.fastapi]` no `pyproject.toml`).
 |---|---|
 | `index.html` | layout: sidebar, topbar (chip da planilha + status), área de chat e composer |
 | `style.css` | tema claro/escuro (CSS vars + `data-theme`), balões, tabelas grandes com scroll, responsivo |
-| `app.js` | consome a API, renderiza markdown (marked + DOMPurify), loading animado, tema e status do backend |
+| `app.js` | consome a API, renderiza markdown (marked + DOMPurify), streaming de tokens, bloco de raciocínio dobável, loading animado, cancelamento, tema, status do backend e botões de limpar histórico/caches |
 
 A stack mais pesada (Streamlit ou React/Next, mapeadas abaixo) ficou como
 evolução possível — o MVP não exigia build tooling.
@@ -393,9 +406,8 @@ evolução possível — o MVP não exigia build tooling.
 
 ### 7.3 Deploy
 
-Os ambientes, o fluxo de branches (`feature/* → develop → main`) e os requisitos
-de deploy (URL fixa por ambiente, variáveis de ambiente separadas) estão em
-[`development.md`](development.md) — issues
+Os requisitos de deploy (URL fixa por ambiente, variáveis de ambiente separadas)
+e o fluxo de branches (`feature/* → develop → main`) estão nas issues
 [#16](https://github.com/gbrielmartinssreo/Natural-Language-Query/issues/16),
 [#17](https://github.com/gbrielmartinssreo/Natural-Language-Query/issues/17) e
 [#18](https://github.com/gbrielmartinssreo/Natural-Language-Query/issues/18).
@@ -429,7 +441,7 @@ FastAPI                (src/nlq/api.py — rotas + StaticFiles)
       ↓
 NLQ Core
       ↓
-openpyxl / csv / busca semântica (futura)
+openpyxl / csv / Pandas / busca semântica
 ```
 
 Streamlit ou React/Next permanecem como alternativa de evolução caso a UI
@@ -439,7 +451,8 @@ cresça além do que o HTML/CSS/JS puro sustenta.
 
 ## 8. Pontos de extensão já previstos no código
 
-- **Registro de ferramentas** (`tools=[create_json, lista_arquivos]` em `agent.py`)
+- **Registro de ferramentas** (`tools=[create_json, goat, lista_arquivos,
+  consultar_schema, buscar_semantico, consultar_dados]` em `agent.py`)
   — cada técnica de consulta pode virar uma tool do agente.
 - **Seleção de modelo** — o modelo é parametrizável em `create_nlq_agent()`.
 - **Troca de fonte de dados** — CSV e XLSX já são lidos; outros formatos podem
@@ -460,7 +473,8 @@ Hoje:
 
 - nível 1 (CSV limpo): suportado;
 - nível 2 (XLSX simples): suportado;
-- nível 3 (XLSX semi-estruturado): lido de forma bruta;
+- nível 3 (XLSX semi-estruturado): parcial — regiões do `xldetect` e mesclas
+  verticais tratadas; mesclas horizontais e cabeçalho multinível ainda não;
 - nível 4 (planilha corporativa complexa): acessível, mas ainda não confiável.
 
 Melhorar o parser para mesclagens, cabeçalhos multinível e múltiplos blocos por aba
