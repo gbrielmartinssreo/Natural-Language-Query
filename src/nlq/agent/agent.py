@@ -292,7 +292,6 @@ def create_nlq_agent():
         [
             load_prompt("system_base.md"),
             load_prompt("specific_role.md"),
-            load_prompt("regra_consulta.md"),
         ]
     )
 
