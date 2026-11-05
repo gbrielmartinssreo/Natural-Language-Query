@@ -128,6 +128,10 @@ def test_endpoints_de_upload_listagem_e_remocao(upload_root):
 
     thread_id = _thread()
     with TestClient(api.app) as client:
+        response = client.get("/")
+        assert response.headers["cache-control"] == "no-store, max-age=0"
+        assert 'app.js?v=2' in response.text
+
         response = client.post(
             "/api/anexos",
             data={"thread_id": thread_id},

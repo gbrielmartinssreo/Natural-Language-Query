@@ -84,7 +84,7 @@ agent, checkpointer = create_nlq_agent()
 
 
 @app.middleware("http")
-async def limitar_upload(request: Request, call_next):
+async def preparar_resposta_http(request: Request, call_next):
     if request.method == "POST" and request.url.path == "/api/anexos":
         content_length = request.headers.get("content-length")
         if content_length:
@@ -97,7 +97,11 @@ async def limitar_upload(request: Request, call_next):
                     status_code=413,
                     content={"detail": "O arquivo excede o limite permitido."},
                 )
-    return await call_next(request)
+    response = await call_next(request)
+    if request.url.path in ("/", "/index.html", "/app.js", "/style.css"):
+        response.headers["Cache-Control"] = "no-store, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+    return response
 
 # Pré-carrega schema e registros em segundo plano para que a primeira
 # consulta não pague a leitura fria das planilhas.
