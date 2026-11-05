@@ -8,6 +8,7 @@ from unittest import mock
 
 import pytest
 from fastapi.testclient import TestClient
+from openpyxl import Workbook
 
 import nlq.attachments as attachments
 from nlq.data.semantic_search import _INDEX_CACHE, _cache_file, evict_index
@@ -26,6 +27,17 @@ def _thread() -> str:
 
 def _csv(content: bytes = b"nome,valor\na,1\n") -> io.BytesIO:
     return io.BytesIO(content)
+
+
+def _xlsx() -> io.BytesIO:
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["nome", "valor"])
+    sheet.append(["a", 1])
+    buffer = io.BytesIO()
+    workbook.save(buffer)
+    buffer.seek(0)
+    return buffer
 
 
 def test_anexo_so_e_visivel_na_propria_conversa(upload_root):
@@ -159,3 +171,33 @@ def test_rejeita_nome_ou_formato_invalido(upload_root, filename):
 def test_rejeita_xlsx_com_conteudo_invalido(upload_root):
     with pytest.raises(ValueError, match="XLSX inválido"):
         attachments.add_attachment(_thread(), "dados.xlsx", io.BytesIO(b"not-xlsx"))
+
+
+def test_upload_xlsx_valido(upload_root):
+    thread_id = _thread()
+    attachment = attachments.add_attachment(thread_id, "dados.xlsx", _xlsx())
+
+    assert attachment["nome"] == "dados"
+    assert attachment["ext"] == "xlsx"
+    with attachments.conversation_scope(thread_id):
+        assert attachments.resolve_visible_path("dados", "xlsx").is_file()
+
+
+def test_endpoint_upload_xlsx_valido(upload_root):
+    import nlq.api as api
+
+    thread_id = _thread()
+    with TestClient(api.app) as client:
+        response = client.post(
+            "/api/anexos",
+            data={"thread_id": thread_id},
+            files={
+                "file": (
+                    "dados.xlsx",
+                    _xlsx().getvalue(),
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
+            },
+        )
+        assert response.status_code == 201
+        assert response.json()["anexo"]["ext"] == "xlsx"

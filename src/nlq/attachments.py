@@ -154,11 +154,19 @@ def _validate_xlsx(path: Path) -> None:
             if total > MAX_FILE_BYTES * 10:
                 raise ValueError("O conteúdo descompactado do XLSX é muito grande")
             if "[Content_Types].xml" not in archive.namelist():
-                raise ValueError("Arquivo XLSX inválido")
-        workbook = load_workbook(path, read_only=True, data_only=True)
-        workbook.close()
+                raise ValueError("Arquivo XLSX inválido: estrutura interna ausente")
     except ValueError:
         raise
+    except zipfile.BadZipFile as exc:
+        raise ValueError(
+            "Arquivo XLSX inválido: não é uma planilha válida"
+        ) from exc
+    except OSError as exc:
+        raise ValueError("Não foi possível ler o arquivo XLSX") from exc
+
+    try:
+        workbook = load_workbook(path, read_only=True, data_only=True)
+        workbook.close()
     except Exception as exc:
         raise ValueError("Arquivo XLSX inválido") from exc
 
@@ -188,7 +196,7 @@ def add_attachment(thread_id: str, filename: str, source: BinaryIO) -> dict:
         directory = _thread_dir(thread_id) / ext
         directory.mkdir(parents=True, exist_ok=True)
         path = directory / f"{name}.{ext}"
-        temporary = directory / f".{uuid.uuid4().hex}.upload"
+        temporary = directory / f".{uuid.uuid4().hex}.{ext}"
 
         size = 0
         try:
