@@ -4,7 +4,9 @@ import logging
 import queue
 import threading
 import time
-from fastapi import FastAPI, Request
+from contextlib import asynccontextmanager, suppress
+from dataclasses import dataclass
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from langchain_core.messages import AIMessageChunk, ToolMessage
@@ -13,7 +15,19 @@ from langgraph.runtime import RunControl
 from pydantic import BaseModel
 
 from nlq.agent.agent import create_nlq_agent
+from nlq.attachments import (
+    MAX_FILE_BYTES,
+    add_attachment,
+    conversation_scope,
+    delete_all,
+    delete_attachment,
+    list_attachments,
+    sweep_expired,
+    touch_message,
+    validate_thread_id,
+)
 from nlq.data.semantic_search import limpar_indices
+from nlq.data.loader import clear_cache as limpar_cache_loader
 from nlq.paths import frontend_dir, load_env
 from nlq.tools.consultar_dados import limpar_cache_dataframes
 from nlq.warmup import aquecer_em_segundo_plano
@@ -51,9 +65,39 @@ FRONTEND_DIR = frontend_dir()
 
 load_env()
 
-app = FastAPI()
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    await asyncio.to_thread(sweep_expired)
+    task = asyncio.create_task(_limpar_expirados_periodicamente())
+    try:
+        yield
+    finally:
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
+
+
+app = FastAPI(lifespan=lifespan)
 
 agent, checkpointer = create_nlq_agent()
+
+
+@app.middleware("http")
+async def limitar_upload(request: Request, call_next):
+    if request.method == "POST" and request.url.path == "/api/anexos":
+        content_length = request.headers.get("content-length")
+        if content_length:
+            try:
+                too_large = int(content_length) > MAX_FILE_BYTES + 1024 * 1024
+            except ValueError:
+                too_large = True
+            if too_large:
+                return JSONResponse(
+                    status_code=413,
+                    content={"detail": "O arquivo excede o limite permitido."},
+                )
+    return await call_next(request)
 
 # Pré-carrega schema e registros em segundo plano para que a primeira
 # consulta não pague a leitura fria das planilhas.
@@ -65,6 +109,33 @@ aquecer_em_segundo_plano()
 # para não apagar um thread que o agente ainda está usando.
 _consultas_ativas: set[str] = set()
 _consultas_lock = threading.Lock()
+
+
+@dataclass
+class _ExecucaoAtiva:
+    cancelado: threading.Event
+    control: RunControl
+    concluido: threading.Event
+
+
+_execucoes_ativas: dict[str, _ExecucaoAtiva] = {}
+
+
+async def _limpar_expirados_periodicamente() -> None:
+    while True:
+        await asyncio.sleep(15 * 60)
+        await asyncio.to_thread(sweep_expired)
+
+
+def _cancelar_execucao(thread_id: str, timeout: float = 15.0) -> bool:
+    with _consultas_lock:
+        execution = _execucoes_ativas.get(thread_id)
+        marked_active = thread_id in _consultas_ativas
+    if execution is None:
+        return not marked_active
+    execution.cancelado.set()
+    execution.control.request_drain("attachment_lifecycle")
+    return execution.concluido.wait(timeout)
 
 
 @app.get("/health")
@@ -318,6 +389,8 @@ def _executar_agente(
     publicar,
     cancelado: threading.Event,
     control: RunControl,
+    thread_id: str = "00000000-0000-0000-0000-000000000000",
+    concluido: threading.Event | None = None,
 ) -> None:
     """
     Executa o agente em thread separada.
@@ -332,6 +405,9 @@ def _executar_agente(
     faz o LangGraph parar no próximo limite de superstep,
     sem matar a thread.
     """
+
+    scope = conversation_scope(thread_id)
+    scope.__enter__()
 
     try:
 
@@ -457,6 +533,15 @@ def _executar_agente(
                 None,
             )
         )
+    finally:
+        scope.__exit__(None, None, None)
+        with _consultas_lock:
+            execution = _execucoes_ativas.get(thread_id)
+            if execution is not None and execution.concluido is concluido:
+                _execucoes_ativas.pop(thread_id, None)
+                _consultas_ativas.discard(thread_id)
+        if concluido is not None:
+            concluido.set()
 
 
 @app.post("/api/chat")
@@ -464,11 +549,17 @@ async def chat(
     request: ChatRequest,
     http_request: Request,
 ):
+    try:
+        thread_id = validate_thread_id(request.thread_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    touch_message(thread_id)
 
     config = {
         "configurable": {
             "thread_id":
-                request.thread_id,
+                thread_id,
         }
     }
 
@@ -483,14 +574,6 @@ async def chat(
     }
 
     async def generate():
-
-        #
-        # Registra a consulta como ativa enquanto o stream existir.
-        #
-        with _consultas_lock:
-            _consultas_ativas.add(
-                request.thread_id
-            )
 
         #
         # Comunicação entre:
@@ -514,6 +597,18 @@ async def chat(
         #
         cancelado = threading.Event()
         control = RunControl()
+        concluido = threading.Event()
+        execution = _ExecucaoAtiva(cancelado, control, concluido)
+
+        with _consultas_lock:
+            if thread_id in _execucoes_ativas:
+                yield _linha({
+                    "type": "error",
+                    "message": "Já há uma consulta nesta conversa.",
+                })
+                return
+            _consultas_ativas.add(thread_id)
+            _execucoes_ativas[thread_id] = execution
 
         def publicar(item) -> None:
             """
@@ -563,6 +658,8 @@ async def chat(
                     publicar,
                     cancelado,
                     control,
+                    thread_id,
+                    concluido,
                 ),
                 daemon=True,
             ).start()
@@ -587,6 +684,9 @@ async def chat(
                     tipo, payload = fila.get_nowait()
 
                 except queue.Empty:
+
+                    if cancelado.is_set() and concluido.is_set():
+                        return
 
                     #
                     # KEEP-ALIVE
@@ -818,11 +918,6 @@ async def chat(
             except queue.Empty:
                 pass
 
-            with _consultas_lock:
-                _consultas_ativas.discard(
-                    request.thread_id
-                )
-
             print(
                 "[STREAM] encerrado",
                 flush=True,
@@ -844,36 +939,73 @@ async def chat(
 def clear_chat(
     request: LimparConversaRequest,
 ):
+    try:
+        thread_id = validate_thread_id(request.thread_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    with _consultas_lock:
-        ativa = (
-            request.thread_id
-            in _consultas_ativas
-        )
-
-    #
-    # Não apaga a conversa enquanto o agente usa o thread.
-    #
-    if ativa:
-
+    if not _cancelar_execucao(thread_id):
         return JSONResponse(
             status_code=409,
             content={
                 "status": "erro",
-                "message": (
-                    "Há uma consulta em andamento "
-                    "para esta conversa."
-                ),
+                "message": "Não foi possível interromper a consulta em andamento.",
             },
         )
 
-    checkpointer.delete_thread(
-        request.thread_id
-    )
+    checkpointer.delete_thread(thread_id)
+    delete_all(thread_id)
 
     return {
         "status": "ok",
     }
+
+
+@app.get("/api/anexos")
+def get_attachments(thread_id: str):
+    try:
+        return {"anexos": list_attachments(thread_id)}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/anexos", status_code=201)
+def upload_attachment(
+    thread_id: str = Form(...),
+    file: UploadFile = File(...),
+):
+    try:
+        normalized = validate_thread_id(thread_id)
+        with _consultas_lock:
+            if normalized in _consultas_ativas:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Aguarde a consulta terminar antes de anexar outro arquivo.",
+                )
+        attachment = add_attachment(normalized, file.filename or "", file.file)
+        return {"status": "ok", "anexo": attachment}
+    except ValueError as exc:
+        status = 413 if "excede o limite" in str(exc) else 400
+        raise HTTPException(status_code=status, detail=str(exc)) from exc
+    finally:
+        file.file.close()
+
+
+@app.delete("/api/anexos/{attachment_id}")
+def remove_attachment(attachment_id: str, thread_id: str):
+    try:
+        thread_id = validate_thread_id(thread_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if not _cancelar_execucao(thread_id):
+        raise HTTPException(
+            status_code=409,
+            detail="Não foi possível interromper a consulta em andamento.",
+        )
+    if not delete_attachment(thread_id, attachment_id):
+        raise HTTPException(status_code=404, detail="Anexo não encontrado")
+    return {"status": "ok"}
 
 
 @app.delete("/api/limpar-cache")
@@ -900,6 +1032,7 @@ def clear_cache():
         )
 
     dataframes = limpar_cache_dataframes()
+    limpar_cache_loader()
     semantica = limpar_indices(disco=True)
 
     return {

@@ -90,19 +90,25 @@ _DF_CACHE: dict[str, tuple[tuple[int, int], dict[str, pd.DataFrame]]] = {}
 
 
 def _resolve_path(name: str, ext: str) -> Path:
-    # Não permita subir diretórios, nem mesmo para outras pastas em sheets/.
-    if not name or Path(name).name != name or name in (".", ".."):
-        raise ValueError("Nome de arquivo inválido")
+    from nlq.attachments import current_thread_id, resolve_visible_path
 
-    pasta_formato = (data_dir() / ext).resolve()
-    path = (pasta_formato / f"{name}.{ext}").resolve()
-    if path.parent != pasta_formato:
-        raise ValueError("Nome de arquivo inválido")
+    if current_thread_id() is None:
+        if not name or Path(name).name != name or name in (".", ".."):
+            raise ValueError("Nome de arquivo inválido")
+        directory = (data_dir() / ext).resolve()
+        path = (directory / f"{name}.{ext}").resolve()
+        if path.parent != directory:
+            raise ValueError("Nome de arquivo inválido")
+        if not path.is_file():
+            raise FileNotFoundError(f"Arquivo não encontrado: {path}")
+        return path
 
-    if not path.is_file():
-        raise FileNotFoundError(f"Arquivo não encontrado: {path}")
+    return resolve_visible_path(name, ext)
 
-    return path
+
+def evict_dataframe(path: str | Path) -> None:
+    """Remove o DataFrame em cache de um único arquivo."""
+    _DF_CACHE.pop(str(Path(path).resolve()), None)
 
 
 def _norm(value: object) -> str:

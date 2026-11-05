@@ -4,7 +4,7 @@ from pathlib import Path
 from langchain_core.tools import tool
 
 from nlq.data.semantic_search import search_documents
-from nlq.paths import data_dir
+from nlq.attachments import resolve_visible_path
 
 
 from time import perf_counter
@@ -19,16 +19,7 @@ LIMITE_POR_REGISTRO = 1500
 
 
 def _resolve_path(name: str, ext: str) -> Path:
-    sheets_dir = data_dir().resolve()
-    path = (sheets_dir / ext / f"{name}.{ext}").resolve()
-
-    if not path.is_relative_to(sheets_dir):
-        raise ValueError("Nome de arquivo inválido")
-
-    if not path.is_file():
-        raise FileNotFoundError(f"Arquivo não encontrado: {path}")
-
-    return path
+    return resolve_visible_path(name, ext)
 
 
 @tool

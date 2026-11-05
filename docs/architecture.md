@@ -78,14 +78,14 @@ semi-estruturadas ou corporativas exigem interpretação que ainda não existe
 | Métricas              | `src/nlq/agent/metrics.py`          | `PerfCallbackHandler`: duração, tokens e chars por tool          | **Atual**    |
 | Warm-up               | `src/nlq/warmup.py`                 | Pré-carrega schema/registros em thread de segundo plano          | **Atual**    |
 | Resposta final        | `src/nlq/main.py` e `src/nlq/api.py` | CLI (Painel `rich`) ou streaming NDJSON (`token` parcial + `result`) | **Atual**    |
-| Interface (Web)       | `frontend/`                          | Frontend estático com consumo de stream NDJSON, cancelamento, raciocínio dobável e tema; falta a seleção/upload de planilha | **Atual** (upload pendente) |
+| Interface (Web)       | `frontend/`                          | Frontend estático com streaming, cancelamento, raciocínio dobável, tema e anexos CSV/XLSX por conversa | **Atual** |
 | Testes                | `tests/`                             | `unittest` das tools, caches, cancelamento, contexto, métricas, paths e desktop | **Atual**    |
 
 A interface web é servida pelo próprio backend HTTP (`src/nlq/api.py` serve a
 API e o `frontend/` estático): chat, streaming de tokens, bloco de raciocínio
 dobável, loading, exibição de resposta, tratamento de erro, cancelamento,
 indicador da planilha consultada, tema claro/escuro e botões de limpar
-histórico/caches. Falta a seleção/upload de planilha.
+histórico/caches e anexos no composer.
 
 ## 3. Fluxo de uma pergunta
 

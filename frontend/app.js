@@ -3,6 +3,7 @@ const API_URL = "";
 const ROTA_CHAT = "/api/chat";
 const ROTA_LIMPAR = "/api/limpar-conversa";
 const ROTA_LIMPAR_CACHE = "/api/limpar-cache";
+const ROTA_ANEXOS = "/api/anexos";
 const ROTA_STATUS = "/health";
 
 const SUGESTOES = [
@@ -36,6 +37,9 @@ const el = {
   suggestions: $("suggestions"),
   chat: $("chat"),
   input: $("input"),
+  attachments: $("attachments"),
+  attachBtn: $("attachBtn"),
+  fileInput: $("fileInput"),
   sendBtn: $("sendBtn"),
   stopBtn: $("stopBtn"),
   scroll: document.querySelector(".scroll"),
@@ -51,6 +55,8 @@ let planilhaAtual = JSON.parse(
 );
 
 let enviando = false;
+let anexos = [];
+let enviandoAnexo = false;
 
 // Controlador da consulta ativa (null quando ocioso).
 let controladorAtual = null;
@@ -72,6 +78,123 @@ function salvar() {
     "mensagens",
     JSON.stringify(mensagens)
   );
+}
+
+
+function mensagemDaApi(dados, fallback) {
+  return dados && (dados.detail || dados.message)
+    ? dados.detail || dados.message
+    : fallback;
+}
+
+
+function renderAnexos() {
+  el.attachments.innerHTML = "";
+  el.attachments.hidden = anexos.length === 0;
+
+  anexos.forEach((anexo) => {
+    const chip = document.createElement("span");
+    chip.className = "attachment";
+
+    const nome = document.createElement("span");
+    nome.className = "attachment-name";
+    nome.textContent = `${anexo.nome}.${anexo.ext}`;
+
+    const remover = document.createElement("button");
+    remover.className = "attachment-remove";
+    remover.type = "button";
+    remover.ariaLabel = `Remover ${nome.textContent}`;
+    remover.textContent = "×";
+    remover.onclick = () => removerAnexo(anexo);
+
+    chip.appendChild(nome);
+    chip.appendChild(remover);
+    el.attachments.appendChild(chip);
+  });
+}
+
+
+async function carregarAnexos() {
+  const threadSolicitado = threadId;
+  try {
+    const r = await fetch(
+      `${API_URL}${ROTA_ANEXOS}?thread_id=${encodeURIComponent(threadSolicitado)}`
+    );
+    if (!r.ok) {
+      throw new Error(`Erro ${r.status}`);
+    }
+    const dados = await r.json();
+    if (threadId !== threadSolicitado) {
+      return;
+    }
+    anexos = dados.anexos || [];
+    renderAnexos();
+  } catch (erro) {
+    console.warn("Não foi possível carregar os anexos:", erro);
+  }
+}
+
+
+async function anexarArquivo(file) {
+  if (!file || enviandoAnexo || enviando) {
+    return;
+  }
+
+  enviandoAnexo = true;
+  el.attachBtn.disabled = true;
+  el.attachBtn.classList.add("uploading");
+
+  const form = new FormData();
+  form.append("thread_id", threadId);
+  form.append("file", file);
+
+  try {
+    const r = await fetch(API_URL + ROTA_ANEXOS, {
+      method: "POST",
+      body: form,
+    });
+    const dados = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      throw new Error(mensagemDaApi(dados, `Erro ${r.status}`));
+    }
+    anexos.push(dados.anexo);
+    renderAnexos();
+  } catch (erro) {
+    alert("Não consegui anexar a planilha: " + erro.message);
+  } finally {
+    enviandoAnexo = false;
+    el.attachBtn.disabled = false;
+    el.attachBtn.classList.remove("uploading");
+    el.fileInput.value = "";
+  }
+}
+
+
+async function removerAnexo(anexo) {
+  if (enviando) {
+    abortarConsulta();
+  }
+
+  try {
+    const url = `${API_URL}${ROTA_ANEXOS}/${encodeURIComponent(anexo.id)}` +
+      `?thread_id=${encodeURIComponent(threadId)}`;
+    const r = await fetch(url, { method: "DELETE" });
+    const dados = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      throw new Error(mensagemDaApi(dados, `Erro ${r.status}`));
+    }
+    anexos = anexos.filter((item) => item.id !== anexo.id);
+    renderAnexos();
+    if (
+      planilhaAtual &&
+      planilhaAtual.nome === anexo.nome &&
+      planilhaAtual.ext === anexo.ext
+    ) {
+      atualizarPlanilha(null);
+    }
+  } catch (erro) {
+    alert("Não consegui remover o anexo: " + erro.message);
+  }
 }
 
 
@@ -238,6 +361,7 @@ async function enviar(texto) {
 
   el.sendBtn.disabled = true;
   el.sendBtn.classList.add("sending");
+  el.attachBtn.disabled = true;
 
   el.stopBtn.hidden = false;
 
@@ -602,6 +726,7 @@ async function enviar(texto) {
     el.sendBtn.classList.remove(
       "sending"
     );
+    el.attachBtn.disabled = enviandoAnexo;
 
     el.stopBtn.hidden = true;
     el.clearHistory.disabled = false;
@@ -629,6 +754,10 @@ function abortarConsulta() {
 
 // ====== LIMPAR HISTÓRICO ======
 async function limparHistorico() {
+  if (enviandoAnexo) {
+    alert("Aguarde o envio do anexo terminar antes de limpar o histórico.");
+    return;
+  }
   if (
     !confirm(
       "Apagar o histórico da conversa?"
@@ -679,9 +808,11 @@ async function limparHistorico() {
     );
 
     mensagens = [];
+    anexos = [];
 
     salvar();
     renderChat();
+    renderAnexos();
     atualizarPlanilha(null);
 
   } catch (erro) {
@@ -841,6 +972,18 @@ el.sendBtn.addEventListener(
 );
 
 
+el.attachBtn.addEventListener(
+  "click",
+  () => el.fileInput.click()
+);
+
+
+el.fileInput.addEventListener(
+  "change",
+  () => anexarArquivo(el.fileInput.files[0])
+);
+
+
 el.stopBtn.addEventListener(
   "click",
   abortarConsulta
@@ -927,6 +1070,8 @@ SUGESTOES.forEach((s) => {
 
 renderLista();
 renderChat();
+renderAnexos();
+carregarAnexos();
 
 checarStatus();
 
