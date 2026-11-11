@@ -356,7 +356,7 @@ conversas.
 > **Em andamento na milestone aberta**
 > [MVP com web / deploy / estabilidade](https://github.com/gbrielmartinssreo/Natural-Language-Query/milestone/2).
 > O backend (API FastAPI, `src/nlq/api.py`) e o frontend (`frontend/`) já
-> existem; falta a seleção/upload de planilha para fechar a issue #19. A
+> existem, incluindo anexos CSV/XLSX temporários por conversa. A
 > interface de desenvolvimento continua sendo a CLI.
 
 A CLI atual permanece como interface de desenvolvimento.
@@ -370,7 +370,7 @@ Requisitos mínimos da
 [issue #19](https://github.com/gbrielmartinssreo/Natural-Language-Query/issues/19):
 
 - [x] chat;
-- [ ] seleção/upload de planilha;
+- [x] seleção/upload de planilha;
 - [x] loading durante o processamento;
 - [x] exibição da resposta;
 - [x] tratamento visual de erro.
@@ -429,7 +429,7 @@ core
 interfaces
 ├── CLI    (main.py — atual)
 ├── API    (api.py — atual)
-└── Web    (frontend/ — atual; upload de planilha pendente)
+└── Web    (frontend/ — atual; upload por conversa implementado)
 ```
 
 Arquitetura atual, com a camada FastAPI servindo API e frontend:

@@ -54,6 +54,12 @@ class _BoundedCache:
         with self._lock:
             self._items.clear()
 
+    def evict_path(self, path: Path) -> None:
+        resolved = str(path.resolve())
+        with self._lock:
+            for key in [key for key in self._items if key[0] == resolved]:
+                del self._items[key]
+
     def __len__(self) -> int:
         with self._lock:
             return len(self._items)
@@ -90,6 +96,15 @@ def clear_cache() -> None:
     """Esvazia os caches de schema e de registros."""
     _SCHEMAS.clear()
     _RECORDS.clear()
+
+
+def evict_path(path: str | Path) -> None:
+    """Remove de RAM os dados associados a um único arquivo."""
+    path = Path(path).resolve()
+    _SCHEMAS.evict_path(path)
+    _RECORDS.evict_path(path)
+    with _CACHE_LOCKS_GUARD:
+        _CACHE_LOCKS.pop(str(path), None)
 
 
 def read_csv(path: str | Path) -> list[dict]:

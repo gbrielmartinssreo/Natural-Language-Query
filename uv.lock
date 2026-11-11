@@ -1135,6 +1135,7 @@ dependencies = [
     { name = "openpyxl" },
     { name = "pandas" },
     { name = "python-dotenv" },
+    { name = "python-multipart" },
     { name = "rich" },
     { name = "xldetect" },
 ]
@@ -1151,6 +1152,7 @@ requires-dist = [
     { name = "openpyxl", specifier = ">=3.1.5" },
     { name = "pandas", specifier = ">=3.0.6" },
     { name = "python-dotenv", specifier = ">=1.2.3" },
+    { name = "python-multipart", specifier = ">=0.0.20" },
     { name = "rich", specifier = ">=15.0.0" },
     { name = "xldetect", specifier = ">=1.0.1" },
 ]

@@ -66,7 +66,7 @@ turnos anteriores da mesma execução, e a interface utiliza `rich` para melhora
 Há também uma **API FastAPI** (`src/nlq/api.py`) expondo o mesmo agente por HTTP
 com **streaming NDJSON** (eventos `status`, `token`, `result`, `error`, `ping`), que serve a
 **interface web**, que conta com: chat, loading, cancelamento de requisição, exibição de resposta e tratamento visual de
-erro; falta a seleção/upload de planilha. 
+erro e anexos CSV/XLSX isolados por conversa.
 As duas interfaces compartilham a mesma sessão (`thread_id="default"`), com bloqueio da limpeza de thread
 durante uma consulta em andamento.
 
@@ -160,11 +160,18 @@ carregado no startup, então as mesmas chaves de API são necessárias.
 | `/`                       | GET    | serve o frontend (`frontend/index.html`, via `StaticFiles(html=True)`)                        |
 | `/health`                 | GET    | health check (`{"status": "ok"}`)                                                             |
 | `/api/chat`               | POST   | streaming NDJSON com eventos (`status`, `token`, `result`, `error`, `ping`). Corpo: `{"message": ..., "thread_id": ...}`. Eventos `token` trazem o texto parcial (`content`); o evento `result` traz `response` e `planilha` (`{"nome": ..., "ext": ...}` ou `null`). |
-| `/api/limpar-conversa`    | DELETE | apaga a thread informada via `{"thread_id": ...}`. Retorna `409` se houver consulta em andamento para esse thread. |
+| `/api/limpar-conversa`    | DELETE | cancela eventual consulta, apaga a thread informada e remove seus anexos. Retorna `409` se o worker não encerrar no prazo. |
 | `/api/limpar-cache`       | DELETE | limpa os caches em RAM (índices semânticos, embeddings de consulta, DataFrames) e os `index-*.pkl` de `/tmp/nlq-cache/`, devolvendo contagens. Retorna `409` se houver consulta em andamento. Sem autenticação; há botão "Limpar caches" na interface web. |
+| `/api/anexos`             | GET/POST | lista ou envia planilhas CSV/XLSX isoladas pelo `thread_id` da conversa. Limites padrão: 5 arquivos e 20 MB por arquivo. |
+| `/api/anexos/{id}`        | DELETE | cancela a consulta ativa e remove imediatamente um anexo e seus caches. |
+
+Os anexos ficam em armazenamento temporário, separados por conversa. Somente
+o envio de mensagens renova o prazo de 24 horas; limpar o histórico também
+remove todos os anexos. No Heroku, restart ou deploy pode apagar os arquivos
+antes desse prazo.
 
 
-A API compartilha o mesmo `checkpointer` com a CLI (memória em RAM). Por padrão a interface web usa `thread_id="default"`, mas o endpoint aceita `thread_id` por requisição. `DELETE /api/limpar-conversa` é bloqueado enquanto houver uma consulta ativa para o mesmo thread.
+A API compartilha o mesmo `checkpointer` com a CLI (memória em RAM). A interface web cria um `thread_id` aleatório por conversa. A limpeza cancela uma consulta ativa antes de apagar o histórico e os anexos.
 
 ### Build automático (GitHub Actions)
 

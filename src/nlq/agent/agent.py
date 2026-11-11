@@ -17,15 +17,16 @@ import uuid
 import requests
 
 from nlq.paths import load_env, prompts_dir, skills_dir
+
+load_env()
+
+from nlq.attachments import cache_scope
 from nlq.tools.extract import create_json
 from nlq.tools.dev_master import goat
 from nlq.tools.listar_planilhas import lista_arquivos
 from nlq.tools.schema_info import consultar_schema
 from nlq.tools.retrieval import buscar_semantico
 from nlq.tools.consultar_dados import consultar_dados
-
-
-load_env()
 
 
 def load_prompt(name: str) -> str:
@@ -73,7 +74,7 @@ class CacheDeChamadas(AgentMiddleware):
     def _chave(tool_call: dict) -> str:
         nome = tool_call.get("name", "")
         args = tool_call.get("args") or {}
-        return nome + "\x00" + json.dumps(
+        return cache_scope() + "\x00" + nome + "\x00" + json.dumps(
             args, sort_keys=True, ensure_ascii=False, default=str
         )
 

@@ -1,34 +1,14 @@
 from langchain_core.tools import tool
 
-import re
-
-from nlq.paths import data_dir
+from nlq.attachments import list_visible_files
 
 
 def listar_csvs() -> list[str]:
-    docs_dir = (data_dir() / "csv").resolve()
-
-    archives = []
-
-    for item in docs_dir.iterdir():
-        if item.is_file():
-            nome = re.sub(r"\([^)]*\)", "", item.name)
-            archives.append(nome.strip())
-
-    return archives
+    return list_visible_files("csv")
 
 
 def listar_xlsx() -> list[str]:
-    docs_dir = (data_dir() / "xlsx").resolve()
-
-    archives = []
-
-    for item in docs_dir.iterdir():
-        if item.is_file():
-            nome = re.sub(r"\([^)]*\)", "", item.name)
-            archives.append(nome.strip())
-
-    return archives
+    return list_visible_files("xlsx")
 
 
 @tool

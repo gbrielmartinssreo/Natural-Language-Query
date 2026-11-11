@@ -5,21 +5,11 @@ from langchain_core.tools import tool
 from openpyxl.utils import get_column_letter
 
 from nlq.data import get_schema
-from nlq.paths import data_dir
+from nlq.attachments import resolve_visible_path
 
 
 def _resolve_path(name: str, ext: str) -> Path:
-    sheets_dir = data_dir().resolve()
-    path = (sheets_dir / ext / f"{name}.{ext}").resolve()
-
-    # O nome vem da LLM: não permite sair da pasta de planilhas.
-    if not path.is_relative_to(sheets_dir):
-        raise ValueError("Nome de arquivo inválido")
-
-    if not path.is_file():
-        raise FileNotFoundError(f"Arquivo não encontrado: {path}")
-
-    return path
+    return resolve_visible_path(name, ext)
 
 
 def _select_sheets(schema: dict, aba: str | None) -> dict[str, list[dict]]:

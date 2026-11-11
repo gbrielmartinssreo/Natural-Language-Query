@@ -182,6 +182,24 @@ def limpar_indices(disco: bool = True) -> dict:
     return liberado
 
 
+def evict_index(path: str | Path) -> None:
+    """Remove o índice semântico de um único arquivo."""
+    path = Path(path).resolve()
+    with _INDEX_LOCK:
+        index = _INDEX_CACHE.pop(path, None)
+        try:
+            if path.is_file():
+                stat = path.stat()
+                fingerprint = (stat.st_mtime_ns, stat.st_size)
+            elif index is not None:
+                fingerprint = index.fingerprint
+            else:
+                return
+            _cache_file(path, fingerprint).unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
 def _embed_query(query: str) -> list[float]:
     """Gera (ou reaproveita) o embedding de uma consulta."""
     cached = _QUERY_CACHE.get(query)
