@@ -1,0 +1,17 @@
+{
+  "name": "Natural-Language-Query",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "sync:chart": "node -e \"const fs=require('node:fs'),p=require('node:path');fs.mkdirSync('frontend/vendor',{recursive:true});fs.copyFileSync(p.join(p.dirname(require.resolve('chart.js')),'chart.umd.min.js'),'frontend/vendor/chart.umd.min.js')\"",
+    "postinstall": "pnpm run sync:chart"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "chart.js": "^4.6.1"
+  }
+}
