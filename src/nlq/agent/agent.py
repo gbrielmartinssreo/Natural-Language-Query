@@ -27,6 +27,7 @@ from nlq.tools.listar_planilhas import lista_arquivos
 from nlq.tools.schema_info import consultar_schema
 from nlq.tools.retrieval import buscar_semantico
 from nlq.tools.consultar_dados import consultar_dados
+from nlq.tools.graph import gerar_grafico
 
 
 def load_prompt(name: str) -> str:
@@ -287,6 +288,7 @@ def create_nlq_agent():
         consultar_schema,
         buscar_semantico,
         consultar_dados,
+        gerar_grafico,
     ]
 
     system_prompt = "\n\n".join(

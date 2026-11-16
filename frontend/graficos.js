@@ -90,8 +90,10 @@ export async function renderizarGraficos(bolha, graficos = []) {
       copia.options.color = corTexto;
       if (copia.options.plugins?.title) copia.options.plugins.title.color = corTexto;
       if (copia.options.scales) {
-        for (const eixo of Object.values(copia.options.scales)) eixo.ticks = {color: corTexto};
-        copia.options.scales.x = {ticks: {color: corTexto}};
+        for (const eixo of Object.values(copia.options.scales)) {
+          eixo.ticks = {...eixo.ticks, color: corTexto};
+          if (eixo.title) eixo.title.color = corTexto;
+        }
       }
       instanciasGraficos.set(canvas, new Chart(canvas, copia));
     } catch (erro) {
