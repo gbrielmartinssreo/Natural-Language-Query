@@ -460,6 +460,7 @@ async function enviar(texto) {
 
       requestAnimationFrame(() => {
         renderPendente = false;
+        if (recebeuResultado) return;
 
         //
         // Renderiza markdown já durante o stream (não
@@ -603,6 +604,22 @@ async function enviar(texto) {
         bolha.innerHTML = textoSeguro(
           respostaFinal
         );
+
+        if (Array.isArray(dados.graficos) && dados.graficos.length) {
+          import("./graficos.js")
+            .then(({ renderizarGraficos }) => {
+              if (bolha.isConnected) return renderizarGraficos(bolha, dados.graficos);
+            })
+            .then(() => {
+              el.scroll.scrollTop = el.scroll.scrollHeight;
+            })
+            .catch((erro) => {
+              console.error("Falha ao renderizar gráficos:", erro);
+              const aviso = document.createElement("p");
+              aviso.textContent = "Não foi possível carregar os gráficos.";
+              bolha.appendChild(aviso);
+            });
+        }
 
         if ("planilha" in dados) {
           atualizarPlanilha(dados.planilha);

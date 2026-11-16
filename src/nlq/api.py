@@ -30,6 +30,7 @@ from nlq.data.semantic_search import limpar_indices
 from nlq.data.loader import clear_cache as limpar_cache_loader
 from nlq.paths import frontend_dir, load_env
 from nlq.tools.consultar_dados import limpar_cache_dataframes
+from nlq.tools.graph import graficos_do_turno
 from nlq.warmup import aquecer_em_segundo_plano
 
 
@@ -839,6 +840,7 @@ async def chat(
                                 response,
                             "planilha":
                                 planilha,
+                            "graficos": graficos_do_turno(payload["messages"]),
                         }
                     )
 
